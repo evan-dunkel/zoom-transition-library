@@ -48,6 +48,23 @@ export const REST = {
   opacity: 0.002,
 };
 
+/**
+ * A value's speed (units per second). Motion's own getVelocity() reads 0 once the value hasn't
+ * changed for 30 ms, so a turn-around started by a click just after a slow frame (common on
+ * phones) lost every card's speed and they stopped dead. This reads the same two samples Motion
+ * keeps, but trusts them for up to 300 ms (a slow phone, or a busy one). A jump() clears them, so a
+ * jumped value reads 0, as it
+ * should. If Motion ever stops keeping them, its own reading is used.
+ */
+export function velocityOf(value: MotionValue<number>) {
+  const m = value as unknown as { prevFrameValue?: number; prevUpdatedAt?: number; updatedAt?: number };
+  if (!("prevFrameValue" in m) || typeof m.updatedAt !== "number") return value.getVelocity();
+  if (m.prevFrameValue === undefined || m.prevUpdatedAt === undefined) return 0;
+  if (performance.now() - m.updatedAt > 300) return 0; // it has stopped (jump() and settle() clear it at once)
+  const dt = m.updatedAt - m.prevUpdatedAt;
+  return dt > 0 ? ((value.get() - Number(m.prevFrameValue)) / dt) * 1000 : 0;
+}
+
 /** The latest springTo per value, so a stale safety timer never overrides a newer animation. */
 const latestSpring = new WeakMap<MotionValue<number>, object>();
 

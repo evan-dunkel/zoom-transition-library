@@ -8,6 +8,12 @@ import zoomBaseCss from "../../../src/zoom/zoom.base.css";
 import zoomThemeCss from "../../../src/zoom/zoom.theme.css";
 import appCss from "./app.css";
 import { Art, Body, artDataUri, entries, type Entry } from "./content";
+// Test-only: the spring helpers, for tests of the timing details that frames can't pin down.
+// (A namespace import: the build of the library as first received has no velocityOf.)
+import * as springs from "../../../src/zoom/springs";
+import { motionValue } from "motion/react";
+const springHelpers: Record<string, unknown> = springs;
+(window as any).__zoomInternals = { springTo: springHelpers.springTo, velocityOf: springHelpers.velocityOf, motionValue };
 
 type Config = {
   scenario: "portfolio" | "grid" | "scrolled" | "mobile" | "reduced" | "rapid" | "late" | "carousel" | "keyboard" | "template" | "dupe" | "hscroll" | "throw" | "big";
@@ -24,6 +30,8 @@ type Config = {
   simulatedReduced?: boolean;
   /** Test-only provider overrides. */
   props?: Partial<ZoomProviderProps>;
+  /** Test-only: rapid scenario's history addresses are this prefix + id (e.g. "#/walks/") instead of the default "#id". */
+  historyPrefix?: string;
 };
 declare global {
   interface Window {
@@ -438,7 +446,11 @@ function App() {
   if (s === "rapid") {
     const items = list(s, 6);
     return (
-      <ZoomProvider {...provider(detail, { history: { mode: "session" } })}>
+      <ZoomProvider
+        {...provider(detail, {
+          history: config.historyPrefix ? { mode: "session", url: (id) => config.historyPrefix + id } : { mode: "session" },
+        })}
+      >
         <Header />
         <main className="page">
           <Tester items={items} />

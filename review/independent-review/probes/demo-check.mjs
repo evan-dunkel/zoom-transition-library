@@ -9,7 +9,7 @@ const page = await context.newPage();
 const errors = [];
 page.on("pageerror", (e) => errors.push("top: " + e.message));
 await page.goto(file);
-for (const id of ["grid", "scrolled", "phone", "reduced", "rapid", "slow", "hscroll", "big", "dupe", "throw"]) {
+for (const id of ["grid", "scrolled", "phone", "reduced", "rapid", "slow", "hscroll", "big", "dupe", "throw", "scroll"]) {
   await page.locator(`#s-${id}`).scrollIntoViewIfNeeded();
   const handle = await page.waitForSelector(`iframe[data-scenario="${id}"][src]`);
   const fr = await handle.contentFrame();

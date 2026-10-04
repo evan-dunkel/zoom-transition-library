@@ -27,6 +27,10 @@ function Project({ id }) {
 }
 ```
 
+**Two presentations**
+- `presentation="cards"` (default): a horizontal pager. The whole group zooms open from the tapped item; neighbours peek in at the sides.
+- `presentation="scroll"`: one continuous vertical column, for reading project after project (a portfolio). Only the tapped item grows; the rest of the page dims behind it, and the item you're reading leaves its place on the page empty, ready to fly back into.
+
 **Good to know**
 - **Reserve image sizes** with `width`/`height`. An image with no size yet can't fly; the card still opens, without the flying image. A detail image that has its size but is still downloading flies as the thumbnail's picture until it arrives.
 - **The thumbnail and the card image can have different shapes.** The picture's crop changes smoothly in flight.

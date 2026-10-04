@@ -9,7 +9,7 @@
 
 ## Verdict
 
-**After Round 3: usable for your portfolio, with the caveats below.** Every Critical and Important issue is fixed and covered by a browser test. Before the fixes, my verdict was:
+**After Round 4: usable for your portfolio, with the caveats below.** Every Critical and Important issue is fixed and covered by a browser test, and the vertical scroll mode you described is in (Round 4). Before the fixes, my verdict was:
 
 **Usable with fixes. It doesn't need a rewrite.** The hard parts are done well, and I confirmed them in the browser:
 - The picture leaves from and lands on the right spot to within 1 px, on scrolled pages and at phone width.
@@ -35,6 +35,44 @@ If you or a developer will maintain it, budget time to own that complexity. If y
 - Still tested only in headless Chromium, not in Safari, Firefox or on a real phone.
 - The file is now about 2,700 lines, and the fixes were also written by AI. The new tests reduce the risk, but don't remove it.
 - The smaller limitations listed as "remains" in the Round 3 table.
+
+---
+
+## Round 4: your third results, and the vertical scroll mode
+
+### Your notes, followed up
+
+Each fix has a browser test in `review/harness/tests/fixes.spec.ts`. The new tests fail on the previous version (Round 3), except two that guard things already right there: the column keeping its place as cards load (the old version built them all at once), and the slow-motion speed handling (fixed in Round 3).
+
+| Your note | What I found | Change | Verified |
+|---|---|---|---|
+| Sticky header: on landing, a shorter element with rounded top corners below the header, then a pop to full height | **Confirmed regression from Round 3.** The cut at the header was rounded like the picture's own corners. | The cut is now a straight edge on a wrapper around the flying picture (and on the card's content), so the picture keeps its full height and its own rounded corners, and simply disappears under the header line, exactly like the real thumbnail. | Test: at take-off and landing, cut at the header line, full height, corner radii 14 px. |
+| Phone, first open: the neighbouring cards still appear partway in | **Confirmed.** My earlier measurement used a 1× screen. On a 2× screen the first open's opening frame takes 83 ms (17 ms on later opens) while the browser prepares the big images, and the springs, already running, jumped ahead. | The motion now waits until the visible cards' pictures are ready (120 ms at most) with the picture sitting on its thumbnail, then plays from the start. | Slowest frame on the first open at 2× now 17 ms (was 83 ms). |
+| New tab and reload didn't reopen the card (`#/walks/rapid-1`) | That address was the link's own `href`. The library only recognised its default `#rapid-1` form. | Any address on the same page (the default, or your own `#…` form) now opens its card on load and is cleared on close. The demo's history uses the links' own addresses. | Test with `#/walks/…`; in the demo file itself: new tab, reload, and a link opened in a new tab all open the card. |
+| Slow photos: a grey box for about 1 s after the thumbnail's picture lands | **Confirmed.** The stand-in only covered the flight. | The card's image shows the thumbnail's picture as its background until the big photo arrives, in the opened card and in its neighbours. | Test: background present while the photo is held back, gone once it arrives. Screenshot: `evidence/slow-after-landing.png`. |
+| Strip at its end: the mouse had to move before a new swipe would turn the page | **Confirmed.** macOS keeps sending the old swipe's momentum until the pointer moves, and I waited for a pause. | The end of a strip now uses the same "new swipe or momentum?" detection as page turns. | Test: momentum swallowed, then a new swipe with the mouse unmoved turns the page. |
+| ✕ scales and drifts in with the card | Unchanged in the horizontal mode (you asked to keep it as is); it's a judgement item in the demo. In the scroll mode the ✕ copy now rides the top of the visible part of the card, where the real button sticks. | | |
+| "Unloaded items are just immediately visible" on close | That's the Round 3 change: cards that were never built, or whose thumbnail is off screen, fade instead of flying. You said you'd tweak it; the scroll mode below is that tweak. | | |
+
+**Also found and fixed while testing these:** turn-arounds could still stop cards dead at normal speed after a slow frame.
+- **Cause:** Motion reports a value's speed as zero once it hasn't changed for 30 ms, which is common on phones. Round 3 only fixed the slow-motion cause.
+- **Fix:** the library now reads the speed samples Motion keeps itself, and trusts them for up to 300 ms (`velocityOf`).
+- **Tests:** two direct tests, each confirmed to fail with its cause put back. A frame-watching test turned out too noisy on a busy test machine to tell the bug from uneven frames, so I replaced it.
+
+### The new vertical scroll mode: `presentation="scroll"`
+
+What you described, as one option; the horizontal mode (`"cards"`, the default) is unchanged.
+- **One continuous column.** Each card is as tall as its content, with no friction or snapping between cards; the column scrolls like a page. (This is the existing `layout="stream"`.)
+- **Only the tapped item grows** into its card. Its picture flies, and the card grows out from around it, limited to the part that will be on screen. The other cards stay in place and fade in.
+- **The page behind:** the rest of the group dims to 0.2 in step with the flight, and the tapped item's place is empty once it lands.
+- **Reading on:** scrolling to the next project swaps which thumbnail is empty. The new one fades out, and the previous one fades back to 0.2.
+- **Closing:** the visible card flies back into its empty place. Its visible window slides back up to the picture if you were reading far down. The neighbouring cards fade and shrink a little where they are, without flying, and the page fades back to full.
+- **Loading:** cards are built lazily (the opened one and its neighbours first). The column's scroll is adjusted as cards are added above, so what you're reading doesn't move.
+- **Tunable:** the dim level (`groupOpacity`), and everything else, can still be set individually.
+
+Screenshots: `evidence/scroll-1-opening.png` to `scroll-5-closed.png`, and `evidence/scroll-close-*.png` for a close from far down a case study. Tests: three in `fixes.spec.ts`.
+
+**Still open:** this mode needs your eye on real content (case studies of real length, real images), and a real phone.
 
 ---
 

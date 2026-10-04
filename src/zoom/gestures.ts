@@ -1,5 +1,5 @@
 import { motionValue, type MotionValue } from "motion/react";
-import { REST, clamp, project, rubber, springTo } from "./springs";
+import { REST, clamp, project, rubber, springTo, velocityOf } from "./springs";
 
 export type GestureLayout = {
   W: number;
@@ -146,17 +146,22 @@ export function attachGestures(root: HTMLElement, c: GestureController) {
     }
     return false;
   };
-  /** When a sideways wheel swipe last scrolled content inside the card (the rest of that swipe stays with it). */
+  /** When a sideways wheel swipe last scrolled content inside the card. */
   let innerScrollT = -Infinity;
-  /** Sideways wheel event over content that scrolls sideways: true if it's the content's (let it scroll). */
+  /**
+   * Sideways wheel event over content that scrolls sideways: true if it's the content's (let it
+   * scroll). When the content reaches its end mid-swipe, the rest of that swipe (its momentum
+   * included) is swallowed, so it doesn't turn the page; a new swipe does, told apart from
+   * momentum the same way as for paging (see swipeTail), with no need to pause or move the mouse.
+   */
   const innerSideways = (e: WheelEvent, dx: number, now: number) => {
     if (canScrollX(e.target, dx)) {
       innerScrollT = now;
+      innerTail.end();
       return true;
     }
-    if (now - innerScrollT < QUIET_MS) {
-      // The content reached its end mid-swipe: the rest of this swipe mustn't turn the page.
-      innerScrollT = now;
+    if (!innerTail.active && now - innerScrollT < QUIET_MS) innerTail.start(Math.sign(dx));
+    if (innerTail.active && innerTail.owns(dx, now)) {
       e.preventDefault();
       return true;
     }
@@ -535,7 +540,7 @@ export function attachGestures(root: HTMLElement, c: GestureController) {
     const d = c.dismiss();
     const t = pull.get();
     const { cx, cy } = pivot(t < 0 ? -1 : 1);
-    const vt = pull.getVelocity();
+    const vt = velocityOf(pull);
     const vs = -(d.maxShrink / pullSpan(L)) * Math.sign(t) * vt;
     pull.stop();
     mapping = false;
@@ -665,6 +670,8 @@ export function attachGestures(root: HTMLElement, c: GestureController) {
   // momentum only ever slows, so the speed dipping and picking up again is fingers
   // back down. A swipe the other way, or after a real pause, is always new.
   const pageTail = swipeTail();
+  /** The rest of a swipe whose content (a sideways strip) reached its end (see innerSideways). */
+  const innerTail = swipeTail();
   let pageAcc = 0;
   let pageLastT = 0;
   // macOS can pause ~200 ms between the fingers lifting and momentum starting, so

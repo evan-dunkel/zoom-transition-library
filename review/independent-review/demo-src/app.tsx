@@ -8,7 +8,7 @@ import baseCss from "../../../src/zoom/zoom.base.css";
 import themeCss from "../../../src/zoom/zoom.theme.css";
 import appCss from "./app.css";
 
-type Scenario = "grid" | "scrolled" | "phone" | "reduced" | "rapid" | "slow" | "hscroll" | "big" | "keyboard" | "dupe" | "throw";
+type Scenario = "grid" | "scrolled" | "phone" | "reduced" | "rapid" | "slow" | "hscroll" | "big" | "keyboard" | "dupe" | "throw" | "scroll";
 type Config = {
   scenario: Scenario;
   /** Number of items in the group. */
@@ -147,7 +147,9 @@ function HeroImage({ it }: { it: Item }) {
     return () => clearTimeout(t);
   }, [ready, it.id, slow]);
   // Width and height are given, so the browser reserves the space even before it loads.
-  return <img src={ready ? heroSrc(it) : undefined} width={1600} height={1000} alt={`Photo: ${it.title}`} />;
+  // Until it "arrives" it has no address and an empty description, so, like a real image still
+  // downloading, it shows nothing of its own (not its description text).
+  return <img src={ready ? heroSrc(it) : undefined} width={1600} height={1000} alt={ready ? `Photo: ${it.title}` : ""} />;
 }
 const loaded = new Set<string>();
 
@@ -371,12 +373,14 @@ function App() {
   const n = cfg.n ?? (s === "big" ? 48 : s === "phone" ? 8 : s === "scrolled" ? 6 : 9);
   const list = items(s, n);
   const byId = new Map(list.map((i) => [i.id, i]));
-  const extra = s === "hscroll" ? <WideContent /> : s === "keyboard" ? <KeyboardExtras /> : null;
+  const extra = s === "hscroll" ? <WideContent /> : s === "keyboard" ? <KeyboardExtras /> : s === "scroll" ? <CaseStudyExtras /> : null;
   const props: ZoomProviderProps = {
     renderDestination: (id) => <Detail it={byId.get(id)!} extra={extra} />,
     getLabel: (id) => byId.get(id)?.title ?? id,
     timeScale: cfg.timeScale ?? 1,
-    ...(s === "rapid" ? { history: { mode: "session" as const } } : {}),
+    // The links' own addresses (#/walks/…), so a link opened in a new tab or reloaded opens its card.
+    ...(s === "rapid" ? { history: { mode: "session" as const, url: (id: string) => `#/walks/${id}` } } : {}),
+    ...(s === "scroll" ? { presentation: "scroll" as const } : {}),
     ...cfg.props,
   };
   let page: ReactNode;
@@ -425,7 +429,7 @@ function App() {
       <>
         <Header />
         <main className="page">
-          <h1>{s === "big" ? `A large gallery (${n} walks)` : "Places we walked this year"}</h1>
+          <h1>{s === "big" ? `A large gallery (${n} walks)` : s === "scroll" ? "Selected work" : "Places we walked this year"}</h1>
           {s === "rapid" && <Rapid list={list} />}
           <Thumbs list={list} group={s} />
         </main>
@@ -437,6 +441,21 @@ function App() {
       {page}
       <Status />
     </ZoomProvider>
+  );
+}
+
+/** Case-study-length content: pictures between the paragraphs, so each card is long. */
+function CaseStudyExtras() {
+  return (
+    <>
+      <p className="d-lead">A case study: the problem, what we tried, and what shipped. Scroll on past the end to reach the next project.</p>
+      {[2, 5, 8].map((seed) => (
+        <figure key={seed} className="d-figure">
+          <img src={photo(seed)} width={1600} height={1000} alt="" />
+          <figcaption>Figure: an early prototype, tested with five people.</figcaption>
+        </figure>
+      ))}
+    </>
   );
 }
 

@@ -72,6 +72,8 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: none;
+  /* The library keeps the card being read in place itself when cards are added above it. */
+  overflow-anchor: none;
 }
 .zoom-stream::-webkit-scrollbar { display: none; }
 .zoom-stream .zoom-card { position: relative; flex: none; overflow: clip; }

@@ -96,7 +96,7 @@ function mediaAspect(hero: HTMLElement, standInAspect: number | null): number | 
 const loaded = (img: HTMLImageElement) => img.complete && img.naturalWidth > 0;
 
 /** The hero's single image, if it hasn't downloaded yet. */
-function pendingImage(hero: HTMLElement) {
+export function pendingImage(hero: HTMLElement) {
   const m = heroMedia(hero);
   return m instanceof HTMLImageElement && !loaded(m) ? m : null;
 }
@@ -172,7 +172,11 @@ export function createFlight(
     snapshot?: HTMLElement;
     /** Added on top of the spring's position every frame (e.g. to follow content scrolled mid-flight). */
     offset?: () => { x: number; y: number };
-    /** A vertical band (in the layer's coordinates) to clip the copy to, or null for none. */
+    /**
+     * A vertical band (in the layer's coordinates) to clip the copy to, or null for none. It's cut
+     * straight across, on a wrapper, as the page cuts content: a header over a rounded thumbnail
+     * hides its top corners rather than rounding off what's left below the header.
+     */
     clip?: () => { top: number; bottom: number } | null;
     /**
      * How much of the hero's own shadow to show (0 to 1), read every frame. The
@@ -263,7 +267,11 @@ export function createFlight(
       (n as HTMLElement).style.height = "100%";
     }
   }
-  layer.appendChild(el);
+  const band = document.createElement("div");
+  band.className = "zoom-clone-band";
+  band.style.cssText = "position:absolute;inset:0;pointer-events:none;";
+  band.appendChild(el);
+  layer.appendChild(band);
 
   const cx = motionValue(A.cx);
   const cy = motionValue(A.cy);
@@ -292,13 +300,10 @@ export function createFlight(
     // Rounded corners have to sit on the box's edges, so rounding clips every side.
     const cropX = ix > 0.5 || round > 0;
     const cropY = iy > 0.5 || round > 0;
-    let it = cropY ? iy : -OUTSIDE;
-    let ib = cropY ? iy : -OUTSIDE;
-    const band = opts.clip ? opts.clip() : null;
-    if (band && sv > 0) {
-      it = Math.max(it, (band.top - top) / sv);
-      ib = Math.max(ib, (top + H0 * sv - band.bottom) / sv);
-    }
+    const it = cropY ? iy : -OUTSIDE;
+    const ib = cropY ? iy : -OUTSIDE;
+    const cut = opts.clip ? opts.clip() : null;
+    band.style.clipPath = cut ? `inset(${cut.top}px -${OUTSIDE}px calc(100% - ${cut.bottom}px) -${OUTSIDE}px)` : "";
     const ixs = cropX ? ix : -OUTSIDE;
     el.style.clipPath =
       cropX || it > -OUTSIDE || ib > -OUTSIDE
@@ -367,7 +372,7 @@ export function createFlight(
       unsubscribe.forEach((u) => u());
       cancelFrame(write);
       [cx, cy, s].forEach((v) => v.stop());
-      el.remove();
+      band.remove();
     },
   };
   return flight;

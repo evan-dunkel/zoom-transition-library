@@ -70,6 +70,7 @@ a { color: var(--accent); }
 .status .ok { color: #7ee2a8; }
 .status .bad { color: #ff8f8f; }
 .status .warn { color: #ffd479; }
-/* A photo that hasn't started downloading (the slow scenario's stand-in for a slow network) shows
-   nothing, as a downloading image does, rather than its description text. */
-.d-hero img:not([src]) { visibility: hidden; }
+.d-lead { font-size: 1.1rem; }
+.d-figure { margin: 24px 0; }
+.d-figure img { display: block; width: 100%; height: auto; border-radius: 10px; }
+.d-figure figcaption { font-size: 0.85rem; color: var(--muted); margin-top: 6px; }
