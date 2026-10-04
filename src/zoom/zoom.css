@@ -89,7 +89,7 @@
    then pop over it), and fades in once the card has landed. */
 .zoom-root[data-phase="opening"] .zoom-close-bar,
 .zoom-root[data-phase="closing"] .zoom-close-bar { opacity: 0; }
-.zoom-root[data-phase="open"] .zoom-close-bar { transition: opacity 180ms ease-out; }
+.zoom-root[data-phase="open"] .zoom-close-bar { transition: opacity 100ms ease-out; }
 @media (prefers-reduced-motion: reduce) { .zoom-root .zoom-close-bar { transition: none; } }
 /* Focus returned after a card opened by mouse or touch: no ring until a key is pressed.
    If your focus ring isn't an outline (e.g. a box-shadow), add it to this rule too. */
@@ -97,6 +97,10 @@
 
 .zoom-flight { position: absolute; inset: 0; pointer-events: none; }
 .zoom-clone { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
+/* A hero that is a single image flies as the whole picture (cropped by the flight), so its
+   image fills the flying box rather than keeping the hero's size. */
+.zoom-clone[data-zoom-fill] .zoom-live :is(img, video, canvas, picture),
+.zoom-clone[data-zoom-fill] .zoom-live svg:not(svg svg) { width: 100%; height: 100%; }
 
 .zoom-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 

@@ -15,10 +15,10 @@ const SCENARIOS = [
       { k: "should", s: "Image leaves exactly from the thumbnail and lands exactly in the card", t: "The image should leave from exactly where the thumbnail is and land exactly in its spot inside the card. The white card grows around it from the thumbnail outward. I measured it at 0 px difference on desktop and phone widths." },
       { k: "fixed", s: "Rounded corners stay rounded through the whole zoom", t: "The image keeps its 14 px rounded corners for the whole flight, both opening and closing. In the original version, the corners turned square in a single frame when the zoom started." },
       { k: "should", s: "Close returns the image to its own thumbnail", t: "Close with Esc, the ✕ button, a click on the dark area, or by scrolling up past the top of the card. The image should shrink back into its own thumbnail." },
-      { k: "fixed", s: "Clicking any empty space closes; clicking a peeking project opens it", t: "Click anywhere outside the cards, including the empty side next to the first or last project: the card closes. Click a neighbouring project that peeks in at the side: it slides over to that project." },
+      { k: "fixed", s: "Empty space closes; the narrow gap between projects does nothing", t: "Click anywhere outside the cards, including the empty side next to the first or last project: the card closes. Clicking the narrow gap between two projects does nothing, so a near miss doesn’t close it. Click a neighbouring project that peeks in at the side: it slides over to that project." },
       { k: "fixed", s: "Esc after a mouse open leaves no focus ring", t: "Open with the mouse, close with Esc: focus goes back to the thumbnail without a focus ring, and the ring appears once you press Tab. Open with the keyboard (Tab, then Enter) and close with Esc: the ring shows, as it should." },
       { k: "note", s: "Neighbouring projects peek in at the sides (paging)", t: "The neighbouring projects peek in at the sides, and ← → moves between them. That is the library’s default “group” behaviour; one setting (<code>paging={false}</code>) shows only the opened project instead." },
-      { k: "fixed", s: "The ✕ button fades in after the image lands (no pop)", t: "The ✕ button stays hidden while the image flies, then fades in once it has landed, instead of popping over it. Its position over the image’s corner is styling and easy to change." },
+      { k: "fixed", s: "The ✕ button fades in quickly once the image lands", t: "The ✕ button stays hidden while the image flies, then fades in quickly (100 ms) once it has landed." },
     ],
   },
   {
@@ -29,8 +29,8 @@ const SCENARIOS = [
     notes: [
       { k: "should", s: "Picture leaves from and lands on exactly the right place", t: "The picture should leave from exactly where the card is and land exactly at the top of the detail page." },
       { k: "fixed", s: "Each corner blends smoothly, open and close (no pop)", t: "Use Slow motion. Each corner blends from the thumbnail’s 14 px to where it ends up: the two top corners to the card’s rounded 28 px, and the two bottom corners to square. Closing does the reverse. In round 2, the top corners went square and then popped round on landing." },
-      { k: "fixed", s: "No picture shift at take-off or landing (the thumbnail dissolves into it)", t: "The thumbnail (4:3) and the detail picture (16:10) are cropped differently. The flight now starts as the thumbnail and dissolves into the detail picture over the first half of the zoom, and does the reverse on close. Before, the picture inside jumped at take-off and landing." },
-      { k: "fixed", s: "Resizing during the zoom re-aims at once, with no snap at the end", t: "Resize the window <em>while</em> a card is zooming open. The card adjusts at the moment you resize, then settles into the new size with no snap at the end. (Round 2 fitted it with a snap once it finished; the original stayed the wrong size.)" },
+      { k: "fixed", s: "The picture's crop changes smoothly from the thumbnail's to the detail's (no jump, no dissolve)", t: "The thumbnail (4:3) and the detail picture (16:10) are cropped differently. The flight now carries the whole picture and changes the crop smoothly from the thumbnail’s to the detail’s, so the first frame looks exactly like the thumbnail and the last exactly like the detail. There’s no dissolve and no double image. This works when the image is just an image (a photo or drawing filling its box)." },
+      { k: "fixed", s: "Resizing mid-zoom finishes the zoom at once, at the new size", t: "Resize the window <em>while</em> a card is zooming open or closed. The zoom finishes immediately at the new size, open or closed, instead of the layout lurching while it catches up." },
       { k: "fixed", s: "Text in an open card can be selected; a mouse drag no longer moves the card", t: "Click and drag across the text of an open story: it should select, ready to copy. A mouse no longer drags the card around. Touch screens still can, to close or to move between stories." },
     ],
   },
@@ -78,7 +78,7 @@ const SCENARIOS = [
     notes: [
       { k: "should", s: "Status bar reads clean ✓ after every test", t: "After every test, the dark status bar at the bottom should read <b>clean ✓</b> once things settle. If a card is still open, press Esc first." },
       { k: "should", s: "Tapping a card as it shrinks home turns it around smoothly", t: "Click a card as it shrinks back home: it should turn around and open again smoothly, without restarting." },
-      { k: "fixed", s: "Closing a card with a different crop no longer jumps at the end", t: "These thumbnails are cropped differently from their detail pictures. Closing should end in a smooth dissolve back to the thumbnail, with no jump." },
+      { k: "fixed", s: "Closing onto a different crop no longer jumps", t: "These thumbnails are cropped differently from their detail pictures. Closing should change the crop smoothly back to the thumbnail’s, with no jump and no dissolve." },
       { k: "note", s: "A reloaded #id address doesn't reopen the card", t: "In “Open in full window”, reloading while a card is open shows the grid, with nothing open. On your real site this is solved by giving every project its own page (for example <code>/work/slug</code>); see the report’s framework section." },
     ],
   },

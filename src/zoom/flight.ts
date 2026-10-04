@@ -31,6 +31,14 @@ export type Flight = {
 export type HeroMetrics = {
   W0: number;
   H0: number;
+  /**
+   * When the hero is just one image (an <img>, <video> or SVG filling its box, cropped
+   * to fit like object-fit: cover), the box that shows the *whole* picture: the hero's
+   * box widened or heightened to the picture's own shape. The flight carries that whole
+   * picture and crops it, so the crop changes smoothly from the thumbnail's to the
+   * hero's instead of starting from a crop of a crop.
+   */
+  fill: { W: number; H: number } | null;
   /** The hero's own corner radii (its first child's, if it has none). */
   radius: Corners;
   /** The hero's own box-shadow ("none" if it has none) and corner radius, for the flight's shadow layer. */
@@ -44,7 +52,37 @@ const OUTSIDE = 10000;
 /** Read everything a flight needs from the hero, in one go, before anything is written. */
 export function measureHero(hero: HTMLElement): HeroMetrics {
   const cs = getComputedStyle(hero);
-  return { W0: hero.offsetWidth, H0: hero.offsetHeight, radius: readCorners(hero), shadow: cs.boxShadow, shadowRadius: cs.borderRadius };
+  const W0 = hero.offsetWidth;
+  const H0 = hero.offsetHeight;
+  const a = mediaAspect(hero);
+  const fill = a && W0 >= 1 && H0 >= 1 && Math.abs(a - W0 / H0) > 0.01 ? (a > W0 / H0 ? { W: H0 * a, H: H0 } : { W: W0, H: W0 / a }) : null;
+  return { W0, H0, fill, radius: readCorners(hero), shadow: cs.boxShadow, shadowRadius: cs.borderRadius };
+}
+
+/** The one image a hero consists of, or null if it has anything else (text, several images). */
+function heroMedia(hero: HTMLElement) {
+  if (hero.textContent?.trim()) return null;
+  const media = [...hero.querySelectorAll<HTMLElement | SVGSVGElement>("img, video, svg, canvas")].filter(
+    (m) => !m.parentElement?.closest("svg"),
+  );
+  return media.length === 1 ? media[0] : null;
+}
+/** The shape (width / height) of a hero's whole picture, when it's a single image cropped to cover its box. */
+function mediaAspect(hero: HTMLElement): number | null {
+  const m = heroMedia(hero);
+  if (!m) return null;
+  if (m instanceof HTMLImageElement || m instanceof HTMLVideoElement) {
+    const w = m instanceof HTMLImageElement ? m.naturalWidth : m.videoWidth;
+    const h = m instanceof HTMLImageElement ? m.naturalHeight : m.videoHeight;
+    return w && h && getComputedStyle(m).objectFit === "cover" ? w / h : null;
+  }
+  if (m instanceof SVGSVGElement) {
+    const vb = m.viewBox.baseVal;
+    return vb && vb.width && vb.height && m.preserveAspectRatio.baseVal.meetOrSlice === SVGPreserveAspectRatio.SVG_MEETORSLICE_SLICE
+      ? vb.width / vb.height
+      : null;
+  }
+  return null;
 }
 
 /**
@@ -77,32 +115,6 @@ export function snapshotOf(hero: HTMLElement, live: boolean) {
 }
 
 /**
- * A still copy of a source (the thumbnail on the page), styles frozen on, for the
- * flight to dissolve from or into. Not cached: a source can look different each time
- * (hover styles, a newly loaded image).
- */
-export function sourceSnapshot(source: HTMLElement) {
-  const node = source.cloneNode(true) as HTMLElement;
-  // Only what a thumbnail's look depends on: copying every computed property (as for
-  // static heroes) cost a noticeable stall at the start of each open on slower phones.
-  freezeStyles(source, node, SOURCE_PROPS, 40);
-  for (const a of ["data-zoom-hidden", "data-zoom-dimmed", "data-zoom-source", "data-zoom-react-source", "id"]) node.removeAttribute(a);
-  node.querySelectorAll("[id]").forEach((n) => n.removeAttribute("id"));
-  node.style.visibility = "visible";
-  node.style.opacity = "1";
-  node.style.margin = "0";
-  node.style.position = "absolute";
-  node.style.left = "0";
-  node.style.top = "0";
-  node.style.transformOrigin = "0 0";
-  node.style.pointerEvents = "none";
-  return { node, w: source.offsetWidth, h: source.offsetHeight };
-}
-
-/** How far into the flight (from the source's end) the source has fully dissolved into the hero. */
-const DISSOLVE = 0.5;
-
-/**
  * Flies a copy of the destination's hero from one rect to another. The copy is
  * scaled uniformly to *cover* each rect and cropped to it, so a square thumbnail
  * can grow into a wide hero (or any other aspect change) without stretching.
@@ -128,16 +140,13 @@ export function createFlight(
      * pops on at take-off and off at landing; this fades it with the flight instead.
      */
     shadowOpacity?: () => number;
-    /**
-     * The source end of the flight: a copy of the thumbnail (sourceSnapshot) and its
-     * box. Near that end the copy is shown over the hero, dissolving into it over the
-     * first part of the flight, so a thumbnail cropped differently from the hero (or a
-     * different image altogether) doesn't jump at take-off or landing.
-     */
-    source?: { node: HTMLElement; w: number; h: number; rect: Rect };
   } = {},
 ): Flight {
-  const { W0, H0, radius, shadow, shadowRadius } = opts.metrics ?? measureHero(hero);
+  const m = opts.metrics ?? measureHero(hero);
+  const { radius, shadow, shadowRadius } = m;
+  // The flying box: the whole picture when the hero is a single image, else the hero's own box.
+  const W0 = m.fill ? m.fill.W : m.W0;
+  const H0 = m.fill ? m.fill.H : m.H0;
   const fit = (r: Rect): Fit => {
     const s = Math.max(r.w / W0, r.h / H0, 1e-6);
     return {
@@ -147,7 +156,7 @@ export function createFlight(
       ix: Math.max(0, (W0 - r.w / s) / 2),
       iy: Math.max(0, (H0 - r.h / s) / 2),
       // On screen, so the corners can blend from the source's radii to the hero's.
-      r: r.r !== undefined ? corners(r.r) : (radius.map((v) => v * s) as Corners),
+      r: r.r !== undefined ? corners(r.r) : (radius.map((v) => v * Math.max(r.w / m.W0, r.h / m.H0)) as Corners),
     };
   };
   let A = fit(from);
@@ -184,12 +193,15 @@ export function createFlight(
     liveHost.style.cssText = `position:absolute;left:0;top:0;width:100%;height:100%;margin:0;${shade ? "box-shadow:none;" : ""}`;
     el.appendChild(liveHost);
   }
-  // The thumbnail's own look, over everything, dissolving as the flight leaves it.
-  const src = opts.source;
-  const sSrc = src ? fit(src.rect).s : 1;
-  // A source the same size as the hero has nothing to dissolve over; skip it.
-  const dissolves = !!src && src.w >= 1 && src.h >= 1 && Math.abs(1 - sSrc) > 0.02;
-  if (src && dissolves) el.appendChild(src.node);
+  if (m.fill) {
+    // The whole picture fills the flying box (it was cropped to the hero's box before).
+    el.dataset.zoomFill = "";
+    const media = heroMedia(copy);
+    for (let n: Element | null = media; n && n !== copy; n = n.parentElement) {
+      (n as HTMLElement).style.width = "100%";
+      (n as HTMLElement).style.height = "100%";
+    }
+  }
   layer.appendChild(el);
 
   const cx = motionValue(A.cx);
@@ -207,16 +219,6 @@ export function createFlight(
     // The corner radii in the copy's own (unscaled) units.
     const radii = r.map((v) => (v > 0.25 && sv > 0 ? v / sv : 0));
     const round = Math.max(...radii);
-    if (src && dissolves) {
-      // Cover the visible (cropped) box with the thumbnail copy, and fade it out over the
-      // first DISSOLVE of the way from the source's scale to the hero's own (1).
-      const vw = W0 - 2 * ix;
-      const vh = H0 - 2 * iy;
-      const k = Math.max(vw / src.w, vh / src.h);
-      src.node.style.transform = `translate(${ix + (vw - src.w * k) / 2}px, ${iy + (vh - src.h * k) / 2}px) scale(${k})`;
-      const u = clamp((sv - sSrc) / (1 - sSrc) / DISSOLVE, 0, 1);
-      src.node.style.opacity = String(1 - u * u * (3 - 2 * u));
-    }
     const o = opts.offset ? opts.offset() : { x: 0, y: 0 };
     const left = cx.get() + o.x - (W0 * sv) / 2;
     const top = cy.get() + o.y - (H0 * sv) / 2;
@@ -294,32 +296,18 @@ function cornersOf(el: HTMLElement): Corners {
   return [px(cs.borderTopLeftRadius), px(cs.borderTopRightRadius), px(cs.borderBottomRightRadius), px(cs.borderBottomLeftRadius)];
 }
 
-/** The properties a thumbnail's appearance comes from (SVG shapes keep their own attributes). */
-const SOURCE_PROPS = [
-  "display", "box-sizing", "width", "height", "padding", "border", "border-radius", "overflow",
-  "background-color", "background-image", "background-size", "background-position", "background-repeat",
-  "color", "font", "line-height", "letter-spacing", "text-align", "white-space",
-  "object-fit", "object-position", "opacity", "filter", "box-shadow", "transform", "transform-origin",
-  "position", "top", "left", "right", "bottom", "margin", "flex", "align-items", "justify-content", "gap",
-  "grid-template-columns", "grid-template-rows", "aspect-ratio", "fill", "stroke", "mix-blend-mode",
-];
-
 const MAX_FROZEN = 300;
-function freezeStyles(source: Element, target: Element, props?: string[], max = MAX_FROZEN) {
+function freezeStyles(source: Element, target: Element) {
   const from = [source, ...source.querySelectorAll("*")];
   const to = [target, ...target.querySelectorAll("*")];
-  const n = Math.min(from.length, to.length, max);
+  const n = Math.min(from.length, to.length, MAX_FROZEN);
   for (let i = 0; i < n; i++) {
     const cs = getComputedStyle(from[i]);
     let text = "";
-    if (props) {
-      for (const prop of props) text += `${prop}:${cs.getPropertyValue(prop)};`;
-    } else {
-      for (let j = 0; j < cs.length; j++) {
-        const prop = cs[j];
-        if (prop === "visibility" || prop.startsWith("transition") || prop.startsWith("animation")) continue;
-        text += `${prop}:${cs.getPropertyValue(prop)};`;
-      }
+    for (let j = 0; j < cs.length; j++) {
+      const prop = cs[j];
+      if (prop === "visibility" || prop.startsWith("transition") || prop.startsWith("animation")) continue;
+      text += `${prop}:${cs.getPropertyValue(prop)};`;
     }
     (to[i] as HTMLElement).style.cssText = text;
   }

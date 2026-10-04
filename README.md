@@ -50,15 +50,15 @@ function Project({ id }) {
 
 - **The hero can sit anywhere in the card.** It can run edge to edge or be inset with a margin, with or without rounded corners. The card lands so the hero covers its thumbnail exactly, and the corner radius blends between the thumbnail's and the hero's.
 - **Reserve image space.** Give images `width`/`height` (or CSS `aspect-ratio`). If a hero hasn't loaded and has no size, it can't fly: the card still opens, but without the shared-image effect.
-- **Match the crop.** Use the same aspect ratio for a thumbnail and its hero, so the picture inside doesn't shift at take-off.
+- **Crops can differ.** The thumbnail can be square and the hero wide: if the hero is a single image, its crop changes smoothly during the flight.
 - **Plain HTML (e.g. Astro):** mark thumbnails with `data-zoom-source="id"`, put detail markup in `<template data-zoom-destination="id">`, and use `scan` with `renderDestination={(id) => <TemplateDestination id={id} />}`. Template HTML becomes live markup, so it must hold only your own markup, with anything visitors wrote escaped.
 
 ## Behaviour
 
 | | |
 |---|---|
-| Open / close | Click a thumbnail. Close with Esc, the ✕ button, a click anywhere outside the cards, scrolling past the card's top, or a touch drag down. Clicking a neighbour that's peeking in switches to it. Tapping a card while it flies home reopens it. The ✕ fades in once the image has landed. |
-| The flight | The image flies from the thumbnail to its spot in the card. Each corner blends from the thumbnail's radius to the one it ends with: the card's own rounded corner, where the image meets it. A copy of the thumbnail dissolves into the image over the first half of the zoom, so different crops don't jump. |
+| Open / close | Click a thumbnail. Close with Esc, the ✕ button, a click on empty space outside the cards, scrolling past the card's top, or a touch drag down. The narrow gap between two cards does nothing, and clicking a neighbour that's peeking in switches to it. Tapping a card while it flies home reopens it. The ✕ fades in once the image has landed. A window resize mid-transition finishes the transition at once. |
+| The flight | The image flies from the thumbnail to its spot in the card. Each corner blends from the thumbnail's radius to the one it ends with: the card's own rounded corner, where the image meets it. If the hero is a single image (an `img`/`video` with `object-fit: cover`, or an SVG set to `slice`), the whole picture flies and its crop changes smoothly from the thumbnail's to the hero's. Thumbnail and hero should show the same picture, both centred. |
 | Group | Thumbnails in the same `group` become a pager. Use ← → or a touch swipe to move between them. `paging={false}` shows only the opened item. |
 | Mouse | A mouse never drags cards. Pressing and dragging selects text. |
 | Reduced motion | Instant: no movement, no fade. Follows the device setting live, or `<MotionConfig reducedMotion="always">`. |

@@ -53,6 +53,13 @@ export const REST = {
 /** The latest springTo per value, so a stale safety timer never overrides a newer animation. */
 const latestSpring = new WeakMap<MotionValue<number>, object>();
 
+/** Stop any spring on a value and put it at `to` now; a pending springTo's safety timer won't override it. */
+export function settle(value: MotionValue<number>, to: number) {
+  latestSpring.set(value, {});
+  value.stop();
+  value.jump(to);
+}
+
 export function springTo(
   value: MotionValue<number>,
   to: number,

@@ -14,7 +14,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { MotionConfigContext, motion, motionValue, useMotionValue, type MotionValue } from "motion/react";
-import { REST, clamp, defaultTiming, springTo, type ZoomTiming } from "./springs";
+import { REST, clamp, defaultTiming, settle, springTo, type ZoomTiming } from "./springs";
 import {
   canFly,
   createFlight,
@@ -22,7 +22,6 @@ import {
   prepareSnapshot,
   readCorners,
   snapshotOf,
-  sourceSnapshot,
   type Corners,
   type Flight,
   type HeroMetrics,
@@ -640,8 +639,6 @@ export function ZoomProvider(props: ZoomProviderProps) {
     /** The last kind of input on the page, and whether this session was opened by pointer. */
     input: "keyboard" as "keyboard" | "pointer",
     pointerOpened: false,
-    /** The window was resized mid-transition: once the new layout has rendered, re-aim at it. */
-    reaim: null as "open" | "sources" | null,
   }).current;
 
   // The shared zoom: the whole pager (card, metadata, neighbours) scales together.
@@ -935,11 +932,9 @@ export function ZoomProvider(props: ZoomProviderProps) {
 
   const isLive = (id: string) => !!heroContent.current.get(id)?.live;
   /** Everything a flight needs from the DOM, read before anything is written. */
-  const prepareFlight = (id: string, hero: HTMLElement, source?: HTMLElement | null) => ({
+  const prepareFlight = (id: string, hero: HTMLElement) => ({
     metrics: measureHero(hero),
     snapshot: snapshotOf(hero, isLive(id)),
-    /** A copy of the thumbnail, for the flight to dissolve from (opening) or into (closing). */
-    source: source ? sourceSnapshot(source) : null,
   });
   /**
    * The hero's corner radii as seen in its card, at the card's full size. Where the hero
@@ -977,8 +972,6 @@ export function ZoomProvider(props: ZoomProviderProps) {
     pre: ReturnType<typeof prepareFlight>,
     /** Heading into the card: the track position its landing spot was worked out for. */
     toCardTrack: number | null = null,
-    /** The thumbnail's box, for the dissolve between it and the hero (with pre.source). */
-    sourceRect: Rect | null = null,
   ) {
     const content = heroContent.current.get(it.id);
     const live = !!content?.live;
@@ -991,7 +984,6 @@ export function ZoomProvider(props: ZoomProviderProps) {
       live: live ? { className: content!.className } : undefined,
       metrics: pre.metrics,
       snapshot: pre.snapshot,
-      source: pre.source && sourceRect ? { ...pre.source, rect: sourceRect } : undefined,
       // Heading into the card: if its content is scrolled mid-flight, the hero's
       // landing spot moves with it, so the flight follows 1:1 (at the card's
       // current scale) and lands exactly where the hero is. No pop at the end.
@@ -1337,7 +1329,7 @@ export function ZoomProvider(props: ZoomProviderProps) {
     // Measure at full size first, before the zoom is applied (and before any writes).
     const card = cardEls.current.get(id)!;
     const heroEl = heroFor(id);
-    const pre = heroEl ? prepareFlight(id, heroEl, S.origin) : null;
+    const pre = heroEl ? prepareFlight(id, heroEl) : null;
     // A hero with no size yet (an image still downloading, its space not reserved) can't
     // fly; the card zooms on its own and the image appears in it when it arrives.
     const hero = pre && canFly(pre.metrics) ? heroEl : null;
@@ -1374,7 +1366,7 @@ export function ZoomProvider(props: ZoomProviderProps) {
     it.sLand = z.s;
     if (hero && heroTarget && pre) {
       it.srcFit = fitOf(pre.metrics, src);
-      const f = startFlight(it, hero, src, heroTarget, pre, trackAt(S.index), src);
+      const f = startFlight(it, hero, src, heroTarget, pre, trackAt(S.index));
       anims.push(
         springTo(f.cx, f.to.cx, T.open, { speed: sp }),
         springTo(f.cy, f.to.cy, T.open, { speed: sp }),
@@ -1595,7 +1587,7 @@ export function ZoomProvider(props: ZoomProviderProps) {
             openCorners: own,
             dest,
             // Only cards without a flight in the air will need a new one.
-            pre: flies && !it.flight ? prepareFlight(id, hero!, dest ? src!.el : null) : null,
+            pre: flies && !it.flight ? prepareFlight(id, hero!) : null,
             metrics: flies ? metrics : null,
           },
         ];
@@ -1710,7 +1702,7 @@ export function ZoomProvider(props: ZoomProviderProps) {
           );
         } else {
           const from = wasLanded ? dest : m.heroRect!;
-          startFlight(it, hero, from, heroTarget, m.pre ?? prepareFlight(id, hero, src.el), target === "open" ? trackAt(index) : null, dest);
+          startFlight(it, hero, from, heroTarget, m.pre ?? prepareFlight(id, hero), target === "open" ? trackAt(index) : null);
           // The hero was moving with its card: its centre's speed follows from the card's.
           const f = it.flight!;
           const fvx = wasLanded ? 0 : toward(cvx + cvs * (off.x + off.w / 2), f.to.cx - f.cx.get());
@@ -1751,15 +1743,29 @@ export function ZoomProvider(props: ZoomProviderProps) {
     });
   };
 
-  // A resize during a transition re-laid out the cards: send them toward the new layout
-  // from wherever they are now (the same turn-around a tap mid-close uses), rather than
-  // finishing at the old size and snapping once open.
-  useLayoutEffect(() => {
-    const target = S.reaim;
-    S.reaim = null;
-    if (!target || (target === "open" ? S.phase !== "opening" : S.phase !== "closing")) return;
-    transitionCards(target, S.index);
-  }, [layout]);
+  /**
+   * Ends the running transition immediately in its end state: open (for an opening, or a
+   * close turned around) or closed. Used when the window is resized mid-transition.
+   */
+  const finishNow = () => {
+    S.gen += 1; // completions of the running springs are ignored from here on
+    if (S.phase === "closing") {
+      closeDone();
+      return;
+    }
+    settle(zx, 0);
+    settle(zy, 0);
+    settle(zs, 1);
+    settle(track, trackAt(S.index));
+    S.ids.forEach((id, j) => {
+      const { cv } = getItem(id, j);
+      settle(cv.x, 0);
+      settle(cv.y, 0);
+      settle(cv.s, 1);
+    });
+    S.mode = "zoom";
+    finishReopen();
+  };
 
   const finishReopen = () => {
     // Back to the resting open state.
@@ -1925,6 +1931,16 @@ export function ZoomProvider(props: ZoomProviderProps) {
       index: () => S.index,
       layout: () => S.L!,
       activeCard: () => cardEls.current.get(S.ids[S.index]) ?? null,
+      betweenCards: (x, y) => {
+        const rs = S.ids.map((id) => cardEls.current.get(id)?.getBoundingClientRect() ?? null);
+        return rs.some((a, j) => {
+          const b = rs[j + 1];
+          if (!a || !b) return false;
+          return S.L?.vertical
+            ? y >= a.bottom && y <= b.top && x >= Math.max(a.left, b.left) && x <= Math.min(a.right, b.right)
+            : x >= a.right && x <= b.left && y >= Math.max(a.top, b.top) && y <= Math.min(a.bottom, b.bottom);
+        });
+      },
       cardAt: (x, y) => {
         const j = S.ids.findIndex((id) => {
           const r = cardEls.current.get(id)?.getBoundingClientRect();
@@ -2041,8 +2057,9 @@ export function ZoomProvider(props: ZoomProviderProps) {
         track.jump(trackAt(S.index));
         return;
       }
-      // Mid-transition: head for the new layout straight away (see the effect on layout).
-      S.reaim = S.phase === "opening" ? "open" : "sources";
+      // Mid-transition, chasing a layout that keeps changing under the springs makes
+      // everything lurch. Finish the transition at once instead, at the new size.
+      finishNow();
     });
     ro.observe(root);
     return () => {

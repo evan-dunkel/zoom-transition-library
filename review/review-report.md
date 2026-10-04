@@ -42,11 +42,24 @@ All changes are in `src/zoom/`. The library as received is still the repo's firs
 | Click empty overlay space to close | **Fixed.** Any click outside the cards closes. Before, the space beside the card paged instead, even with no neighbour there. Clicking a neighbour that's peeking in still switches to it. |
 | ✕ covered by the image in flight, then pops over it | **Fixed.** The button is hidden while a hero flies and fades in (180 ms) once it lands. With reduced motion, it's simply there. |
 | Corners pop in the card grid (sharp, then rounded) | **Fixed.** You were right: round 2 only blended to the hero's *own* radius. An edge-to-edge hero is rounded by the *card's* corners. Corners are now handled one by one: where the hero meets a corner of the card, it blends to the card's radius (28 px at the top in the demo), elsewhere to its own (square). The same happens in reverse on close. |
-| Images jump on close when crops differ (scenarios 2 and 6) | **Fixed.** The flight now carries a copy of the thumbnail on top of the hero. The copy dissolves into the hero over the first half of the zoom, and back again over the last half of a close. Different crops, or even different images, no longer jump. With matching crops, as in your layout, the dissolve is invisible. Trade-off: with very different crops, both pictures show faintly at once for a moment mid-dissolve. The dissolve length is one constant (`DISSOLVE` in `flight.ts`, currently half the zoom). Copying the thumbnail adds about 8 ms at the start of each open on a desktop (about 30 ms with the CPU slowed 4×). |
+| Images jump on close when crops differ (scenarios 2 and 6) | **Fixed** (replaced in round 4 by a smooth crop change, below). The flight now carries a copy of the thumbnail on top of the hero. The copy dissolves into the hero over the first half of the zoom, and back again over the last half of a close. Different crops, or even different images, no longer jump. With matching crops, as in your layout, the dissolve is invisible. Trade-off: with very different crops, both pictures show faintly at once for a moment mid-dissolve. The dissolve length is one constant (`DISSOLVE` in `flight.ts`, currently half the zoom). Copying the thumbnail adds about 8 ms at the start of each open on a desktop (about 30 ms with the CPU slowed 4×). |
 | Resize during opening snaps when it finishes ("expected?") | It was expected with the round 2 fix. It's now **re-aimed immediately**: the card adjusts at the moment of the resize, then settles into the new size with no snap at the end. |
 | Stages don't load on mobile | Opening a downloaded HTML file on a phone usually shows it without running its scripts, so the stages can't load. **Fix:** run `npm run demo:serve` and open the printed address on your phone (same Wi-Fi). Checked on an emulated phone; not on a real iPhone **[Uncertain]**. |
 
 All 27 browser tests pass: 25 behaviour checks, plus the 2 known limitations, which fail as expected.
+
+### Round 4: second results round
+
+All changes are in the library (`src/zoom/`), which your site will use. The demo only bundles it.
+
+| Your note | What changed |
+|---|---|
+| Fade the ✕ faster | 180 ms → **100 ms**. |
+| Don't dismiss on the small gap between projects | **Clicking the gap between two cards now does nothing.** Clicking a neighbour still switches to it, and clicking other empty space (above or below, or past the first or last card) still closes. It works in every layout: side by side, vertical (`orientation="vertical"`, gaps above and below) and a single scrolling column (`layout="stream"`). |
+| Resize mid-transition lurches while the spring catches up | **A resize during a transition now finishes it at once,** at the new size: an opening card is simply open, a closing card simply closed. Nothing chases a layout that's still changing. A resize while open re-fits as before. |
+| No dissolve; shift smoothly between aspect ratios | **The dissolve is gone.** When the hero is just one image (an `<img>` or `<video>` with `object-fit: cover`, or an SVG set to `slice`), the flight carries the *whole* picture and crops it. The crop moves smoothly from what the thumbnail shows to what the detail page shows. The first frame matches the thumbnail (measured pixel difference 0.5 of 255; the original measured 9.3), with no double image. Heroes with anything else in them (text over the image, several images) fly as before. One assumption: the thumbnail and hero crop the same picture, both centred. |
+
+All 31 browser tests pass: 29 behaviour checks, plus the 2 known limitations, which fail as expected.
 
 ### Recommended setup for a portfolio on Cloudflare: Astro
 

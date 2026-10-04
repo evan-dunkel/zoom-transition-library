@@ -26,6 +26,17 @@ const clean = (page: Page) => page.evaluate(() => (window as any).clean());
 const near = (a: any, b: any, tol = 1) =>
   expect(Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y), Math.abs(a.w - b.w), Math.abs(a.h - b.h))).toBeLessThanOrEqual(tol);
 
+/** Mean per-channel difference (0-255) between two PNG screenshots, computed in the page. */
+const pixelDiff = (page: Page, a: Buffer, b: Buffer) =>
+  page.evaluate(async ([a, b]) => {
+    const load = (src: string) => new Promise<HTMLImageElement>((r) => { const i = new Image(); i.onload = () => r(i); i.src = "data:image/png;base64," + src; });
+    const px = (img: HTMLImageElement) => { const c = document.createElement("canvas"); c.width = img.width; c.height = img.height; const x = c.getContext("2d")!; x.drawImage(img, 0, 0); return x.getImageData(0, 0, c.width, c.height).data; };
+    const [da, db] = (await Promise.all([load(a), load(b)])).map(px);
+    let sum = 0;
+    for (let i = 0; i < da.length; i += 4) sum += Math.abs(da[i] - db[i]) + Math.abs(da[i + 1] - db[i + 1]) + Math.abs(da[i + 2] - db[i + 2]);
+    return sum / (da.length / 4) / 3;
+  }, [a.toString("base64"), b.toString("base64")]);
+
 async function flight(page: Page, id: string) {
   const before = await page.evaluate((id) => (window as any).src(id), id);
   const rec = page.evaluate((id) => (window as any).record(id, 2000), id);
@@ -69,15 +80,43 @@ test.describe("geometry", () => {
     expect(f.last.radii).toEqual([28, 28, 0, 0]); // top corners clipped by the 28px card, bottom square
   });
 
-  test("the thumbnail dissolves into the hero, and back on close (no jump when crops differ)", async ({ page }) => {
+  for (const [name, scenario, id, vp] of [
+    ["4:3 thumbnail into a 16:10 hero", "grid", "grid-2", { width: 1400, height: 900 }],
+    ["square thumbnail into a 16:10 hero", "mobile", "mobile-2", { width: 390, height: 800 }],
+  ] as const) {
+    test(`the first flying frame looks exactly like the thumbnail; the crop changes smoothly from there (${name})`, async ({ page }) => {
+      await page.setViewportSize(vp);
+      await open(page, { scenario, timeScale: 0.02 });
+      const r = await page.evaluate((id) => (window as any).src(id), id);
+      const clip = { x: r.x + 2, y: r.y + 2, width: r.w - 4, height: r.h - 4 };
+      const before = await page.screenshot({ clip });
+      await page.click(`[data-tile="${id}"]`);
+      await page.waitForTimeout(60);
+      const after = await page.screenshot({ clip });
+      // Mean per-channel difference, 0-255. The library as received measured about 9 here.
+      expect(await pixelDiff(page, before, after)).toBeLessThan(1.5);
+      expect(await page.evaluate((id) => "zoomFill" in document.querySelector<HTMLElement>(`.zoom-clone[data-zoom-id="${id}"]`)!.dataset, id)).toBe(true);
+    });
+  }
+
+  test("resizing the window mid-transition finishes it at once at the new size, with no motion after", async ({ page }) => {
     await open(page, { scenario: "grid" });
-    const f = await flight(page, "grid-2");
-    expect(f.first.srcOpacity).toBeCloseTo(1, 1);
-    expect(f.last.srcOpacity).toBeCloseTo(0, 1);
-    const rec = page.evaluate(() => (window as any).record("grid-2", 1400));
+    const rec = page.evaluate(() => (window as any).record("grid-1", 1500));
+    await page.click('[data-tile="grid-1"]');
+    await page.waitForTimeout(150);
+    await page.setViewportSize({ width: 600, height: 800 });
+    const frames = ((await rec) as any[]).filter((x) => x.card);
+    const k = frames.findIndex((x) => x.phase === "open");
+    expect(frames[k].t - frames[0].t).toBeLessThan(400); // done right at the resize, not after the spring
+    for (let i = k + 1; i < frames.length; i++) {
+      expect(Math.abs(frames[i].card.w - frames[i - 1].card.w) + Math.abs(frames[i].card.x - frames[i - 1].card.x)).toBeLessThan(0.5);
+    }
+    expect(frames.at(-1).card.x + frames.at(-1).card.w).toBeLessThanOrEqual(600);
+    // and mid-close: it simply finishes closing
     await page.keyboard.press("Escape");
-    const c = ((await rec) as any[]).filter((x) => x.clone && x.clone.w !== undefined);
-    expect(c.at(-1).clone.srcOpacity).toBeCloseTo(1, 1);
+    await page.waitForTimeout(100);
+    await page.setViewportSize({ width: 700, height: 800 });
+    await expect.poll(() => clean(page)).toMatchObject({ phase: "idle", clones: 0, hidden: 0, htmlOverflow: "", inert: 0 });
   });
 
   test("the close button is hidden while the hero flies and shown once it lands", async ({ page }) => {
@@ -87,19 +126,6 @@ test.describe("geometry", () => {
     const frames: any[] = await rec;
     expect(frames.filter((x) => x.phase === "opening" && x.closeOpacity !== null).every((x) => x.closeOpacity === "0")).toBe(true);
     expect(frames.at(-1).closeOpacity).toBe("1");
-  });
-
-  test("resizing the window while a card is opening re-aims it, with no snap once open", async ({ page }) => {
-    await open(page, { scenario: "grid" });
-    const rec = page.evaluate(() => (window as any).record("grid-1", 2000));
-    await page.click('[data-tile="grid-1"]');
-    await page.waitForTimeout(150);
-    await page.setViewportSize({ width: 600, height: 800 });
-    const frames = ((await rec) as any[]).filter((x) => x.card);
-    const k = frames.findIndex((x) => x.phase === "open");
-    const jump = (i: number) => Math.abs(frames[i].card.w - frames[i - 1].card.w) + Math.abs(frames[i].card.x - frames[i - 1].card.x);
-    for (let i = Math.max(k, 1); i < frames.length; i++) expect(jump(i)).toBeLessThan(1);
-    expect(frames.at(-1).card.x + frames.at(-1).card.w).toBeLessThanOrEqual(600);
   });
 
   test("resizing the window while a card is opening still fits the card to the window", async ({ page }) => {
@@ -145,6 +171,26 @@ test.describe("clicks outside the card", () => {
     await expect.poll(() => phase(page)).toBe("idle");
   });
 });
+
+for (const [label, props] of [["vertical pager", { orientation: "vertical" }], ["stream", { layout: "stream" }], ["horizontal pager", {}]] as const) {
+  test(`the narrow gap between two cards does nothing; empty space beside them closes (${label})`, async ({ page }) => {
+    await page.setViewportSize({ width: 1400, height: 900 });
+    await open(page, { scenario: "grid", props });
+    await page.click('[data-tile="grid-2"]');
+    await expect.poll(() => phase(page)).toBe("open");
+    const g = await page.evaluate(() => ({ a: (window as any).R((window as any).card("grid-2").getBoundingClientRect()), b: (window as any).R((window as any).card("grid-3").getBoundingClientRect()) }));
+    const vertical = label !== "horizontal pager";
+    const gap = vertical ? { x: g.a.x + g.a.w / 2, y: (g.a.y + g.a.h + g.b.y) / 2 } : { x: (g.a.x + g.a.w + g.b.x) / 2, y: g.a.y + g.a.h / 2 };
+    await page.mouse.click(gap.x, gap.y);
+    await page.waitForTimeout(700);
+    expect(await phase(page)).toBe("open");
+    // (a stream has no single active card; the pagers must still show the same one)
+    if (label !== "stream") expect(await page.evaluate(() => document.querySelector<HTMLElement>(".zoom-card:not([inert])")!.dataset.zoomId)).toBe("grid-2");
+    if (vertical) await page.mouse.click(Math.max(5, g.a.x - 40), g.a.y + 100);
+    else await page.mouse.click(g.a.x + 100, Math.max(3, g.a.y - 10));
+    await expect.poll(() => phase(page)).toBe("idle");
+  });
+}
 
 test.describe("robustness", () => {
   test("a hero image that hasn't downloaded yet doesn't freeze the page", async ({ page, context }) => {

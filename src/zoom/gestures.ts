@@ -43,6 +43,8 @@ export type GestureController = {
   activeCard(): HTMLElement | null;
   /** The index of the card under a point on screen, if any. */
   cardAt(x: number, y: number): number | null;
+  /** Whether a point is in the narrow gap between two neighbouring cards. */
+  betweenCards(x: number, y: number): boolean;
   activeScroller(): HTMLElement | null;
   dismiss(): GestureDismiss;
   paging(): GesturePaging;
@@ -732,8 +734,9 @@ export function attachGestures(root: HTMLElement, c: GestureController) {
     const sel = window.getSelection();
     if (sel && !sel.isCollapsed && sel.anchorNode && root.contains(sel.anchorNode)) return;
     if (c.layout().stream) {
-      // Every card in a stream is content; only a tap off all of them closes.
-      if (target.closest(".zoom-card")) return;
+      // Every card in a stream is content; only a tap off all of them (and not in the
+      // narrow gap between two of them) closes.
+      if (target.closest(".zoom-card") || c.betweenCards(e.clientX, e.clientY)) return;
       c.close();
       return;
     }
@@ -743,11 +746,13 @@ export function attachGestures(root: HTMLElement, c: GestureController) {
       c.close(); // a tap outside the card while it's opening sends it back
       return;
     }
-    // A neighbour peeking in: go to it. Anywhere else (the dimmed backdrop, the gaps
-    // between cards, past the last card): close. Neighbours are inert, so the click lands
-    // on what's behind them; find the card by position instead.
+    // A neighbour peeking in: go to it. The narrow gap between two cards: nothing (too
+    // easy to hit by accident). Anywhere else (the dimmed backdrop above or below, past
+    // the first or last card): close. Neighbours are inert, so the click lands on what's
+    // behind them; find the card by position instead.
     const j = c.cardAt(e.clientX, e.clientY);
     if (j !== null && j !== c.index()) c.page(j - c.index());
+    else if (j === null && c.betweenCards(e.clientX, e.clientY)) return;
     else c.close();
   };
 
