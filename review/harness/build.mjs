@@ -19,12 +19,16 @@ mkdirSync(originalDir, { recursive: true });
 for (const f of git("ls-tree", "--name-only", "--full-tree", received, "src/zoom/").trim().split("\n")) {
   writeFileSync(join(originalDir, f.split("/").pop()), git("show", `${received}:${f}`));
 }
+writeFileSync(join(originalDir, "empty.css"), "");
 // Points the app's imports of ../../../src/zoom at that copy.
 const useOriginal = {
   name: "use-original-library",
   setup(b) {
     b.onResolve({ filter: /src\/zoom/ }, (args) => {
-      const rest = args.path.split("src/zoom")[1].replace(/^\//, "");
+      let rest = args.path.split("src/zoom")[1].replace(/^\//, "");
+      // The original shipped one zoom.css: the base half maps onto it, the theme half onto nothing.
+      if (rest === "zoom.base.css") rest = "zoom.css";
+      if (rest === "zoom.theme.css") rest = "empty.css";
       const file = rest ? join(originalDir, rest) : join(originalDir, "index.ts");
       return { path: /\.(tsx?|css)$/.test(file) ? file : `${file}.ts` };
     });

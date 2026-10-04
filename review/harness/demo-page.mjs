@@ -18,7 +18,7 @@ const SCENARIOS = [
       { k: "fixed", s: "Empty space closes; the narrow gap between projects does nothing", t: "Click anywhere outside the cards, including the empty side next to the first or last project: the card closes. Clicking the narrow gap between two projects does nothing, so a near miss doesn’t close it. Click a neighbouring project that peeks in at the side: it slides over to that project." },
       { k: "fixed", s: "Esc after a mouse open leaves no focus ring", t: "Open with the mouse, close with Esc: focus goes back to the thumbnail without a focus ring, and the ring appears once you press Tab. Open with the keyboard (Tab, then Enter) and close with Esc: the ring shows, as it should." },
       { k: "note", s: "Neighbouring projects peek in at the sides (paging)", t: "The neighbouring projects peek in at the sides, and ← → moves between them. That is the library’s default “group” behaviour; one setting (<code>paging={false}</code>) shows only the opened project instead." },
-      { k: "fixed", s: "The ✕ button: after landing, or with the flight (switch at the top)", t: "With “✕ after landing” (the default), the button stays hidden while the image flies, then fades in quickly (100 ms) once it lands. With “✕ with flight”, it fades in and out with the flight itself, drawn above the flying image, and hands over to the real button in place. The setting is <code>closeButtonTiming</code>." },
+      { k: "fixed", s: "The ✕ button fades with the flight (default), or after landing (switch at the top)", t: "With “✕ with flight” (now the default), the button fades in and out with the flight itself, drawn above the flying image, and hands over to the real button in place. With “✕ after landing”, it stays hidden while the image flies and fades in quickly (100 ms) once it lands. The setting is <code>closeButtonTiming</code>." },
     ],
   },
   {
@@ -271,8 +271,8 @@ footer { max-width: 1240px; margin: 0 auto; padding: 0 16px 40px; color: var(--m
       <button type="button" data-speed="0.08" aria-pressed="false">Super slow</button>
     </div>
     <div class="seg" role="group" aria-label="Close button timing">
-      <button type="button" data-close="after" aria-pressed="true">✕ after landing</button>
-      <button type="button" data-close="flight" aria-pressed="false">✕ with flight</button>
+      <button type="button" data-close="flight" aria-pressed="true">✕ with flight</button>
+      <button type="button" data-close="after" aria-pressed="false">✕ after landing</button>
     </div>
   </div>
 </div></div>
@@ -299,7 +299,7 @@ const BUNDLES = { fixed: decode(${JSON.stringify(b64(js))}), original: decode(${
 const REDUCED_STUB = ${JSON.stringify(REDUCED_STUB)};
 const store = { get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} } };
 let speed = 1;
-let closeTiming = "after";
+let closeTiming = "flight";
 let lib = "fixed";
 const stageHtml = (scenario, reduced) =>
   '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Scenario: ' + scenario + '</title></head><body><div id="app"></div><script>window.ZOOM_DEMO=' +

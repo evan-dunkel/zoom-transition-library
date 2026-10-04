@@ -3,7 +3,9 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { ZoomProvider, ZoomSource, ZoomHero, TemplateDestination, useZoom, type ZoomProviderProps } from "../../../src/zoom";
-import zoomCss from "../../../src/zoom/zoom.css";
+// The two halves of zoom.css (a bundler would follow its @imports; here they're inlined as text).
+import zoomBaseCss from "../../../src/zoom/zoom.base.css";
+import zoomThemeCss from "../../../src/zoom/zoom.theme.css";
 import appCss from "./app.css";
 import { Art, Body, artDataUri, entries, type Entry } from "./content";
 
@@ -16,6 +18,8 @@ type Config = {
   timeScale?: number;
   /** The provider's closeButtonTiming. */
   closeTiming?: "after" | "flight";
+  /** Test-only: load only zoom.base.css (no default look). */
+  noTheme?: boolean;
   /** Shown in the status bar when the reduced-motion media query is being simulated. */
   simulatedReduced?: boolean;
   /** Test-only provider overrides. */
@@ -29,7 +33,7 @@ declare global {
 }
 const config: Config = window.ZOOM_DEMO ?? { scenario: "grid" };
 
-for (const css of [zoomCss, appCss]) {
+for (const css of config.noTheme ? [zoomBaseCss, appCss] : [zoomBaseCss, zoomThemeCss, appCss]) {
   const style = document.createElement("style");
   style.textContent = css;
   document.head.appendChild(style);
@@ -331,7 +335,7 @@ const filler = (n: number) =>
 
 function App() {
   const [timeScale, setTimeScale] = useState(config.timeScale ?? 1);
-  const [closeTiming, setCloseTiming] = useState(config.closeTiming ?? "after");
+  const [closeTiming, setCloseTiming] = useState(config.closeTiming ?? "flight");
   useEffect(() => {
     window.__zoomDemo = { setTimeScale: (v) => { config.timeScale = v; setTimeScale(v); } };
     const onMsg = (e: MessageEvent) => {

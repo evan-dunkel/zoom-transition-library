@@ -146,9 +146,9 @@ test.describe("geometry", () => {
     }
   });
 
-  test('closeButtonTiming "flight": the close button fades in with the flight, above the image, and hands over in place', async ({ page }) => {
+  test('the close button (default closeButtonTiming "flight") fades in with the flight, above the image, and hands over in place', async ({ page }) => {
     await page.setViewportSize({ width: 1400, height: 900 });
-    await open(page, { scenario: "portfolio", props: { closeButtonTiming: "flight" } });
+    await open(page, { scenario: "portfolio" });
     const trace = page.evaluate(() => new Promise<any[]>((resolve) => {
       const out: any[] = []; const t0 = performance.now();
       const step = (now: number) => {
@@ -170,8 +170,8 @@ test.describe("geometry", () => {
     expect(await page.evaluate(() => getComputedStyle(document.querySelector(".zoom-card:not([inert]) .zoom-close-bar")!).opacity)).toBe("1");
   });
 
-  test("the close button is hidden while the hero flies and shown once it lands", async ({ page }) => {
-    await open(page, { scenario: "portfolio" });
+  test('closeButtonTiming "after": the close button is hidden while the hero flies and shown once it lands', async ({ page }) => {
+    await open(page, { scenario: "portfolio", props: { closeButtonTiming: "after" } });
     const rec = page.evaluate(() => (window as any).record("portfolio-1", 1500));
     await page.click('[data-tile="portfolio-1"] .pf-thumb');
     const frames: any[] = await rec;
@@ -242,6 +242,34 @@ for (const [label, props] of [["vertical pager", { orientation: "vertical" }], [
     await expect.poll(() => phase(page)).toBe("idle");
   });
 }
+
+test("with only zoom.base.css (no theme), everything still works and nothing is styled", async ({ page }) => {
+  await open(page, { scenario: "grid", noTheme: true });
+  const f = await flight(page, "grid-2");
+  near(f.first, f.before);
+  near(f.last, f.hero);
+  const look = await page.evaluate(() => {
+    const c = (window as any).card("grid-2") as HTMLElement;
+    return {
+      cardRadius: getComputedStyle(c).borderTopLeftRadius,
+      surface: getComputedStyle(c.querySelector(".zoom-card-content")!).backgroundColor,
+      dim: getComputedStyle(document.querySelector(".zoom-dim")!).backgroundColor,
+      closePosition: getComputedStyle(c.querySelector(".zoom-close")!).position,
+    };
+  });
+  expect(look).toEqual({ cardRadius: "0px", surface: "rgba(0, 0, 0, 0)", dim: "rgba(0, 0, 0, 0)", closePosition: "static" });
+  await page.keyboard.press("Escape");
+  await expect.poll(() => clean(page)).toMatchObject({ phase: "idle", clones: 0, hidden: 0, htmlOverflow: "", inert: 0 });
+});
+
+test("zoom.css is exactly the base and theme files together", async () => {
+  const { build } = await import("esbuild");
+  const src = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..", "src", "zoom");
+  const out = await build({ entryPoints: [join(src, "zoom.css")], bundle: true, write: false, minify: true, logLevel: "silent" });
+  const both = await build({ stdin: { contents: '@import "./zoom.base.css"; @import "./zoom.theme.css";', resolveDir: src, loader: "css" }, bundle: true, write: false, minify: true, logLevel: "silent" });
+  expect(out.outputFiles[0].text).toBe(both.outputFiles[0].text);
+  expect(out.outputFiles[0].text).toContain(":where(.zoom-card)");
+});
 
 test.describe("robustness", () => {
   test("a hero image that hasn't downloaded yet doesn't freeze the page", async ({ page, context }) => {

@@ -1,0 +1,39 @@
+/*
+ * Zoom: the default look. Optional.
+ * Every rule is wrapped in :where(), so it has no specificity: any rule of yours on
+ * the same class wins, without !important. Change it with the --zoom-* custom
+ * properties, override single rules, or leave this file out and style the classes
+ * yourself (zoom.base.css is the part that's required).
+ */
+
+/* The dimmed backdrop. How strong it gets is the provider's dim prop. */
+:where(.zoom-dim) { background: var(--zoom-dim-color, #000); }
+
+/* The card: corners on the clip and on its surface, the surface's colour. */
+:where(.zoom-card) {
+  border-radius: var(--zoom-card-radius, 28px);
+  color: var(--zoom-card-color, inherit);
+}
+:where(.zoom-card-content) {
+  border-radius: var(--zoom-card-radius, 28px);
+  background: var(--zoom-card-bg, #fff);
+}
+
+/* The built-in close button (closeButton={true}): a small round button, top right. */
+:where(.zoom-close) {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--zoom-close-bg, rgba(255, 255, 255, 0.72));
+  color: var(--zoom-close-color, #1c1c1e);
+  cursor: pointer;
+}
+:where(.zoom-close)::before { content: ""; position: absolute; inset: -7px; } /* 44px hit area */
+:where(.zoom-close):focus-visible { outline: 2px solid var(--zoom-focus, currentColor); outline-offset: 2px; }

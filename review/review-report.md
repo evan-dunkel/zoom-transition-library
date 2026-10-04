@@ -71,6 +71,19 @@ All 31 browser tests pass: 29 behaviour checks, plus the 2 known limitations, wh
 
 All 33 browser tests pass: 31 behaviour checks, plus the 2 known limitations, which fail as expected.
 
+### Round 6
+
+- **`closeButtonTiming` now defaults to `"flight"`.** The ✕ fades with the flight, and `"after"` is still available.
+- **The CSS is split.**
+  - `zoom.base.css` holds the structure and is required.
+  - `zoom.theme.css` holds the default look and is optional. Its rules have zero specificity (`:where()`), so your own rules always win.
+  - `zoom.css` imports both.
+- **Checked:**
+  - The split loses or changes no declaration.
+  - `zoom.css` produces exactly the base and theme files together.
+  - With only the base file, the zoom works as before with nothing styled.
+- **Tests:** 37 checks. 35 pass, and the 2 known limitations fail as expected.
+
 ### Recommended setup for a portfolio on Cloudflare: Astro
 
 **Use [Astro](https://astro.build) with its React integration**, and build it as a static site:

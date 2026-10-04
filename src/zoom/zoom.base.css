@@ -1,0 +1,139 @@
+/*
+ * Zoom: the structure the library needs to work. Required.
+ * Positioning, layers, scrolling, hiding sources, the flying copies and the timing of
+ * the close button. Nothing here is about looks: pair it with zoom.theme.css for the
+ * default look, or style the classes yourself (see the README's Styling section).
+ */
+.zoom-root {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+  touch-action: pan-y;
+}
+/* Text in an open card stays selectable; only a touch drag in progress turns selection off. */
+.zoom-dragging { -webkit-user-select: none; user-select: none; }
+.zoom-root.zoom-fixed { position: fixed; z-index: 1000; }
+.zoom-root[data-open] { visibility: visible; pointer-events: auto; }
+/* While closing, the page behind is live again (tap a source to turn the close
+   around); only the cards and covers on their way home catch taps. */
+.zoom-root[data-open][data-phase="closing"] { pointer-events: none; }
+.zoom-root[data-phase="closing"] .zoom-card,
+.zoom-root[data-phase="closing"] .zoom-clone { pointer-events: auto; cursor: pointer; }
+
+/* The backdrop. Its opacity is set by the library (the dim prop); its colour is the theme's. */
+.zoom-dim { position: absolute; inset: 0; opacity: 0; pointer-events: none; }
+.zoom-zoomer { position: absolute; inset: 0; transform-origin: 0 0; }
+.zoom-track { position: absolute; top: 0; left: 0; height: 100%; }
+
+/* The card itself is a transparent clip. Its visible surface belongs to
+   .zoom-card-content, inside the scroller, so the browser's own overscroll bounce moves
+   the whole card, not just what's on it: no seam between the card's edge and its content.
+   Give both the same border-radius (the theme does, from --zoom-card-radius). */
+.zoom-card {
+  position: absolute;
+  transform-origin: 0 0;
+  overflow: hidden;
+}
+.zoom-card-scroll {
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  container-type: inline-size; /* destination content can size itself with cqw */
+}
+.zoom-card-scroll::-webkit-scrollbar { display: none; }
+.zoom-dragging .zoom-card-scroll { overflow: hidden; }
+/* Vertical pager: no overscroll bounce inside a card. Reaching the end stops dead and
+   the next swipe turns the page; a bounce kept the content moving at the edge, so a
+   new swipe there was hard to tell from the old one and the page wouldn't turn. */
+.zoom-vertical .zoom-card-scroll { overscroll-behavior-y: none; }
+.zoom-card-content {
+  position: relative;
+  min-height: 100%;
+  overflow: clip; /* keep the content inside the rounded corners when it bounces */
+}
+
+/* Stream (layout="stream"): one natively scrolled column of cards, each as tall as its
+   content. The cards sit in the column's flow; the column is the only scroller, so
+   each card's close bar sticks to the top of the screen while that card is in view. */
+.zoom-stream {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+.zoom-stream::-webkit-scrollbar { display: none; }
+.zoom-stream .zoom-card { position: relative; flex: none; overflow: clip; }
+.zoom-stream .zoom-card-scroll { height: auto; overflow: visible; }
+/* Hold still while a card is pulled sideways, and while cards fly home. */
+.zoom-dragging .zoom-stream,
+.zoom-root[data-phase="closing"] .zoom-stream { overflow-y: hidden; }
+
+/* A zero-height sticky bar at the top of the content holds the close button: it stays
+   put while you scroll, and moves with the card when it bounces. Position the button
+   inside it (the theme puts it top right). */
+.zoom-close-bar { position: sticky; top: 0; height: 0; z-index: 6; }
+/* The close button is hidden while a hero flies (it would sit under the flying image).
+   closeButtonTiming="flight" (default): a copy above the image fades with the flight
+   and the real one takes over in place, with no fade of its own. "after": the real one
+   fades in quickly once the card has landed. */
+.zoom-root[data-phase="opening"] .zoom-close-bar,
+.zoom-root[data-phase="closing"] .zoom-close-bar { opacity: 0; }
+.zoom-root[data-phase="open"] .zoom-close-bar { transition: opacity 100ms ease-out; }
+.zoom-root[data-close-sync] .zoom-close-bar { transition: none; }
+@media (prefers-reduced-motion: reduce) { .zoom-root .zoom-close-bar { transition: none; } }
+/* Focus returned after a card opened by mouse or touch: no ring until a key is pressed.
+   If your focus ring isn't an outline (e.g. a box-shadow), add it to this rule too. */
+[data-zoom-quiet-focus]:focus-visible { outline: none !important; }
+
+.zoom-flight { position: absolute; inset: 0; pointer-events: none; }
+.zoom-clone { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
+/* A hero that is a single image flies as the whole picture (cropped by the flight), so its
+   image fills the flying box rather than keeping the hero's size. */
+.zoom-clone[data-zoom-fill] .zoom-live :is(img, video, canvas, picture),
+.zoom-clone[data-zoom-fill] .zoom-live svg:not(svg svg) { width: 100%; height: 100%; }
+
+.zoom-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+[data-zoom-hidden] { visibility: hidden !important; }
+/* groupOpacity: the rest of the group, dimmed behind an open card. */
+[data-zoom-dimmed] { opacity: var(--zoom-group-opacity, 1); }
+
+/* Debug: wheel-dismiss edge zones (debug prop). If any of a band is on screen, a
+   swipe toward that edge can close the card. Brighter while the content is in the
+   zone; brightest while a swipe is armed. */
+.zoom-debug-edge {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  display: flex;
+  justify-content: flex-start; /* clear of the close button */
+  padding: 3px 10px;
+  box-sizing: border-box;
+  pointer-events: none;
+  font: 600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.02em;
+  color: #ff2d78;
+  background: repeating-linear-gradient(135deg, rgba(255, 45, 120, 0.1) 0 6px, rgba(255, 45, 120, 0.03) 6px 12px);
+  box-shadow: inset 0 0 0 1px rgba(255, 45, 120, 0.45);
+  transition: background-color 120ms ease;
+}
+.zoom-debug-top { top: 0; align-items: flex-end; }
+.zoom-debug-bottom { bottom: 0; align-items: flex-start; }
+.zoom-root[data-zone-top] .zoom-card:not([inert]) .zoom-debug-top,
+.zoom-root[data-zone-bottom] .zoom-card:not([inert]) .zoom-debug-bottom { background-color: rgba(255, 45, 120, 0.14); }
+.zoom-root[data-zone-top] .zoom-card:not([inert]) .zoom-debug-top span::after,
+.zoom-root[data-zone-bottom] .zoom-card:not([inert]) .zoom-debug-bottom span::after { content: " · in zone"; }
+.zoom-root[data-armed-top] .zoom-card:not([inert]) .zoom-debug-top,
+.zoom-root[data-armed-bottom] .zoom-card:not([inert]) .zoom-debug-bottom { background-color: rgba(255, 45, 120, 0.38); }
+.zoom-root[data-armed-top] .zoom-card:not([inert]) .zoom-debug-top span::after,
+.zoom-root[data-armed-bottom] .zoom-card:not([inert]) .zoom-debug-bottom span::after { content: " · armed"; }

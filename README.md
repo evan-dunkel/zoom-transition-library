@@ -10,7 +10,7 @@ on the same page (optionally with its own address in the browser history).
 
 ```tsx
 import { ZoomProvider, ZoomSource, ZoomHero, useZoom } from "./zoom";
-import "./zoom/zoom.css";
+import "./zoom/zoom.css"; // or zoom.base.css alone, to style it all yourself (see Styling)
 
 export function Work({ projects }) {
   return (
@@ -59,7 +59,7 @@ function Project({ id }) {
 |---|---|
 | Open / close | Click a thumbnail. Close with Esc, the ✕ button, a click on empty space outside the cards, scrolling past the card's top, or a touch drag down. The narrow gap between two cards does nothing, and clicking a neighbour that's peeking in switches to it. Tapping a card while it flies home reopens it. The ✕ fades in once the image has landed. A window resize mid-transition finishes the transition at once. |
 | The flight | The image flies from the thumbnail to its spot in the card. Each corner blends from the thumbnail's radius to the one it ends with: the card's own rounded corner, where the image meets it. If the hero is a single image (an `img`/`video` with `object-fit: cover`, or an SVG set to `slice`), the whole picture flies and its crop changes smoothly from the thumbnail's to the hero's. Thumbnail and hero should show the same picture, both centred. While the image flies, its card is clipped around it and grows out from it, so the card never shows beside the image. |
-| Close button | `closeButtonTiming="after"` (default): hidden while the image flies, fades in over 100 ms once it lands. `"flight"`: fades in and out with the flight, drawn above the flying image. |
+| Close button | `closeButtonTiming="flight"` (default): fades in and out with the flight, drawn above the flying image, and hands over to the real button in place. `"after"`: hidden while the image flies, fades in over 100 ms once it lands. |
 | Group | Thumbnails in the same `group` become a pager. Use ← → or a touch swipe to move between them. `paging={false}` shows only the opened item. |
 | Mouse | A mouse never drags cards. Pressing and dragging selects text. |
 | Reduced motion | Instant: no movement, no fade. Follows the device setting live, or `<MotionConfig reducedMotion="always">`. |
@@ -68,18 +68,34 @@ function Project({ id }) {
 
 ## Styling
 
-The library is **not fully headless**: it ships `zoom.css`, which you need. The CSS splits into two kinds:
+The CSS comes in two files:
 
-- **Structure (required).** The overlay, the card layers, scrolling, the sticky close bar, hiding sources and the flying copies. Without it nothing positions correctly.
-- **Look (defaults you can change).** These have defaults you can override:
-  - **Card:** `--zoom-card-bg`, `--zoom-card-color` and `--zoom-card-radius`.
-  - **Dimmed backdrop:** colour from `--zoom-dim-color`; strength from the `dim` prop.
-  - **Close button:** `--zoom-close-bg`, `--zoom-close-color` and `--zoom-focus`. To replace the button entirely, use `closeButton={(close) => <YourButton />}`; to hide it, `closeButton={false}`.
-  - **Layout:** card spacing and maximum width come from the `geometry` prop.
+| File | What it is | Needed? |
+|---|---|---|
+| `zoom.base.css` | Structure: the overlay, the card layers, scrolling, the sticky close bar, hiding sources, the flying copies and the close button's timing. Nothing about looks. | **Yes** |
+| `zoom.theme.css` | The default look: the card's background, text colour and corners, the backdrop colour, and the built-in close button (a small round button, top right). | Optional |
 
-  You can also restyle the library's classes (`.zoom-card`, `.zoom-close`, `.zoom-dim`, …) from your own CSS.
+`zoom.css` imports both, for the defaults in one line.
 
-Everything inside a card is yours: whatever `renderDestination` returns, styled however you like. What you can't change is the card's own markup, `article.zoom-card > .zoom-card-scroll > .zoom-card-content`.
+**Headless:** import `zoom.base.css` only, then style the classes yourself:
+
+| Class | What it is |
+|---|---|
+| `.zoom-dim` | The backdrop; give it a background colour. Its opacity comes from the `dim` prop. |
+| `.zoom-card` and `.zoom-card-content` | The card. Give both the same border-radius, and give the content a background. |
+| `.zoom-close` | The built-in button. Or pass `closeButton={(close) => <YourButton />}`, or `closeButton={false}`. |
+
+Without a theme, the zoom works exactly the same, with nothing styled (a test checks this).
+
+**Keeping the theme but changing it:** every theme rule is wrapped in `:where()`, so it has no specificity. Any rule of yours on the same class wins, with no `!important` needed. For small changes, set the custom properties:
+- `--zoom-card-bg`, `--zoom-card-color`, `--zoom-card-radius`
+- `--zoom-dim-color`
+- `--zoom-close-bg`, `--zoom-close-color`, `--zoom-focus`
+
+**Elsewhere:**
+- Card spacing and maximum width come from the `geometry` prop; backdrop strength comes from `dim`.
+- Everything inside a card is yours: whatever `renderDestination` returns.
+- What you can't replace is the card's own markup, `article.zoom-card > .zoom-card-scroll > .zoom-card-content`.
 
 ## Scripts
 

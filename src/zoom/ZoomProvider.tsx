@@ -218,9 +218,9 @@ export type ZoomProviderProps = {
   closeLabel?: string;
   /**
    * When the close button appears and disappears.
-   * - "after" (default): hidden while the image flies, fading in quickly once it lands.
-   * - "flight": fades in and out with the flight itself (its opacity follows the card's
-   *   progress), drawn above the flying image so it's never covered.
+   * - "flight" (default): fades in and out with the flight itself (its opacity follows
+   *   the card's progress), drawn above the flying image so it's never covered.
+   * - "after": hidden while the image flies, fading in quickly once it lands.
    */
   closeButtonTiming?: "after" | "flight";
 };
@@ -654,7 +654,7 @@ export function ZoomProvider(props: ZoomProviderProps) {
     inerted: [] as HTMLElement[],
     /** The per-frame card clip loop is running. */
     clipLoop: false,
-    /** The visible card's close button and its place in the card (card units), for closeButtonTiming "flight". */
+    /** The visible card's close button and its place in the card (card units), for closeButtonTiming "flight" (the default). */
     closeOff: null as { el: HTMLElement; x: number; y: number } | null,
     /** The last kind of input on the page, and whether this session was opened by pointer. */
     input: "keyboard" as "keyboard" | "pointer",
@@ -1117,7 +1117,7 @@ export function ZoomProvider(props: ZoomProviderProps) {
       e >= 0.999 ? "" : `inset(${inset.map((v) => `${v}px`).join(" ")} round ${radii.map((v) => `${v}px`).join(" ")})`;
   };
 
-  /** closeButtonTiming "flight": a still copy of the close button above the flying image, fading with it. */
+  /** closeButtonTiming "flight" (the default): a still copy of the close button above the flying image, fading with it. */
   const closeCopy = useRef<HTMLElement | null>(null);
   const measureClose = (id: string) => {
     const card = cardEls.current.get(id);
@@ -1135,7 +1135,7 @@ export function ZoomProvider(props: ZoomProviderProps) {
   const moveCloseCopy = () => {
     const it = items.current.get(S.ids[S.index]);
     const off = S.closeOff;
-    if (latest.current.closeButtonTiming !== "flight" || !it || !it.flight || !it.clipOn || !off || !S.L) {
+    if (latest.current.closeButtonTiming === "after" || !it || !it.flight || !it.clipOn || !off || !S.L) {
       dropCloseCopy();
       return;
     }
@@ -2316,7 +2316,7 @@ export function ZoomProvider(props: ZoomProviderProps) {
       <div
         ref={rootRef}
         className={["zoom-root", fixed && "zoom-fixed", layout?.vertical && "zoom-vertical"].filter(Boolean).join(" ")}
-        data-close-sync={props.closeButtonTiming === "flight" ? "" : undefined}
+        data-close-sync={props.closeButtonTiming === "after" ? undefined : ""}
         role="dialog"
         aria-modal="true"
         // Named after the visible item, so a screen reader says what opened.
