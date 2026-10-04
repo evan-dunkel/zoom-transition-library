@@ -20,6 +20,7 @@ But one problem hits real sites directly. Normally the thumbnail and the big det
 - Opening a card does work for every card in the group, so a large gallery hitches at the moment of the tap.
 - Sideways-scrolling content inside a card can't be scrolled.
 - Keyboard focus isn't moved into the card if you hide the built-in close button.
+- Once a transition ends, focus is moved even if the visitor has already clicked somewhere else, so their typing goes to the wrong place (I9, found from your demo results).
 
 Other cautions:
 - It is one 2,400-line file with a lot of interlocking state.
@@ -27,6 +28,23 @@ Other cautions:
 - The repository's own test command fails if you follow the README's install steps.
 
 If you or a developer will maintain it, budget time to own that complexity. If you only need a portfolio grid, compare it with the browser's built-in View Transitions API, which needs far less code (see "Uncertain").
+
+---
+
+## Round 2: your demo results (Dia on a MacBook Air M5), followed up
+
+You confirmed every "Problem I found" item and every "Should work" item, except the four below. I reproduced each of your observations in the browser before acting on it.
+
+| Your note | What I found | Where in this report |
+|---|---|---|
+| Page turns (← →) are too slow, with too much tail | **Confirmed.** A page turn is 90% of the way there at 332 ms, but keeps creeping until about 850 ms. | New **M12**, with tested settings |
+| Phone width, first open only: the other items "instantly appear in flight already in the horizontal row" | **Confirmed.** On the first open, the first frame takes about 100 ms, so the neighbouring cards appear already partway faded in. Later opens are smooth from the first frame (17 ms frames). This is the start-up cost in **I1**, worst on the very first open. | Added to **I1** |
+| Click, Esc, click, Esc in very slow motion: cards jump left and right, and flicker | **Confirmed.** When a close is turned around, cards that were moving fast stop dead in one frame and then speed up the other way, instead of curving back. The card you clicked moves slowly at that point, so it looks fine; the far ones visibly jerk. They do end up in the right place. | New **M11** |
+| When things settle, focus is taken away from me typing here | **Confirmed, and it affects real pages too.** I clicked a search box on the page while a card flew home and typed "ab". When the card landed, the library moved focus back to the thumbnail, so the next keystrokes ("cd") went to the thumbnail instead of the box. In the demo, it pulled focus out of the checklist into a frame. | New **I9** |
+| Show the ✕ only on the active card, not on every card | Agreed. It's a design issue: the neighbouring cards show their own ✕, but those buttons do nothing until that card becomes the active one. | New **M13** |
+| 48-item gallery: 33 ms slowest frame, only slightly hesitant | That fits: an M5 is far faster than a mid-range phone. The same test with the CPU slowed 4× froze for 370 ms. | **I1** |
+
+The demo now has a "Page turn" switch at the top so you can compare timings yourself, and a general-notes box above "Copy results".
 
 ---
 
@@ -109,6 +127,7 @@ Import `zoom.css` for the default look, or `zoom.base.css` to style everything y
   | 48 | 370 ms |
 
   At normal desktop speed, 48 items still produced a 66 ms freeze.
+- **Worst on the very first open** (found from your demo results): at phone width, the first frame of the first open took about 100 ms, so the neighbouring cards appeared already partway faded in. Later opens ran at 17 ms per frame from the start. [Confirmed]
 - **Data cost:** opening one card also requested *every* card's big photo at once (9 requests for a 9-item group). On a phone connection, that's wasted data, and it slows the one photo the visitor wants (which makes C1 worse).
 - **Note:** items without a `group` all fall into one group called "default", so a page with unrelated zoomable things gets one big pager.
 - **Where:**
@@ -184,6 +203,15 @@ Import `zoom.css` for the default look, or `zoom.base.css` to style everything y
 - **Where:** `review/harness/build.mjs:47` (`nodePaths` is only a fallback, so the library picks up the root copy of React).
 - **Suggested fix:** in the test bundle, point `react` and `react-dom` explicitly at one copy (an esbuild `alias`), or don't install the root dependencies for tests.
 
+**I9. Focus is moved after a transition ends, even if the visitor has already moved on.** [Confirmed; found from your demo results]
+- **What a user sees:** while a card is flying home, the page behind is live again. Say a visitor clicks a search box and starts typing. When the card lands, the library moves focus to the thumbnail, so the rest of their typing goes nowhere useful. In my test, "ab" went into the box and "cd" didn't.
+- The same happens at the end of opening (focus moves to ✕). That's how the demo pulled focus out of your checklist and into a frame.
+- **Where:**
+  - `src/zoom/ZoomProvider.tsx:2067`: on landing, focus goes back to the thumbnail.
+  - `src/zoom/ZoomProvider.tsx:1625`: after opening, focus goes to ✕.
+- **Suggested fix:** only move focus if it is still where the library left it (inside the card, on the page body, or on the element that opened the card). Never take it from a field the visitor has chosen since.
+- **Probe:** `probes/round2.mjs focus-steal`.
+
 ### Minor
 
 **M1. A thumbnail partly hidden under a sticky header pops out on top of the header.** [Confirmed; documented]
@@ -231,6 +259,30 @@ Import `zoom.css` for the default look, or `zoom.base.css` to style everything y
 - A public timing option, `fadeOut`, is documented as unused (`springs.ts:18`).
 - Opening a non-live hero (`live={false}`) copies every computed style of every element in it, which is slow. The earlier review's own probe measured 220–310 ms freezes with the CPU slowed 4×.
 
+**M11. Turning a close around makes fast-moving cards stop dead, then reverse.** [Confirmed in slow motion; found from your demo results]
+- **What a user sees:** you close a card and click it again while it's flying home. The cards near it turn around smoothly. Cards further away were moving fast (about 25 px per frame at ×0.1 speed); they stop in a single frame and then speed up the other way. After several interruptions in a row, the cards visibly jerk left and right before settling in the right place.
+- **Why:** the new springs should start with each card's current speed, and the code tries to pass it on, but for those cards it arrives as zero. The exact cause is **Uncertain**: my best guess is that the speed reads as zero when the turn-around starts from a click rather than from inside an animation frame.
+- **Where:** `src/zoom/ZoomProvider.tsx:1686–1717` (`bake`, which reads each card's speed) and `:1839–1846` (where it is handed to the new springs).
+- **Fix:** record each card's speed on every animation frame, and use the last recorded value at a turn-around, instead of asking for it at the moment of the click.
+- **Probe:** `probes/turnaround.mjs`, `probes/round2.mjs interrupt`.
+
+**M12. Page turns (← →, swipes) take too long to settle.** [Confirmed; found from your demo results]
+- The spring is tuned to iOS's "smooth" curve (`timing.page`, `src/zoom/springs.ts:24`). A page turn is 90% done at 332 ms, then creeps the last few pixels until about 850 ms. On a desktop display that reads as sluggish.
+- **This is a setting, not a code change.** Measured in the browser for a 728 px page turn:
+
+  | `timing.page` | 90% there | Fully at rest |
+  |---|---|---|
+  | `{ duration: 0.5, bounce: 0 }` (default) | 332 ms | ~850 ms |
+  | `{ duration: 0.35, bounce: 0 }` | 244 ms | ~630 ms |
+  | `{ duration: 0.3, bounce: 0.1 }` | 183 ms | ~520 ms |
+
+- Try them with the demo's new "Page turn" switch. Pass your pick as `timing={{ page: { duration: 0.3, bounce: 0.1 } }}` on `<ZoomProvider>`.
+
+**M13. Every card shows its own ✕, including the neighbours peeking in at the sides.** [Confirmed; design point from your demo results]
+- Only the active card's ✕ does anything (the neighbours are switched off), so the extra buttons are visual noise, and they look like they should work.
+- **Where:** `src/zoom/ZoomProvider.tsx:597` (every card renders the button).
+- **Fix:** a one-line style rule hides it on inactive cards, for example in your own CSS: `.zoom-card[inert] .zoom-close-bar { opacity: 0; }`. Better still, the library's default theme should include it. You may want it to fade in as a card becomes active.
+
 ---
 
 ## 3. Your checklist, answered
@@ -266,7 +318,7 @@ Import `zoom.css` for the default look, or `zoom.base.css` to style everything y
 - **Focus:**
   - Moves to ✕ when open and returns to the thumbnail when closed. [Confirmed]
   - Tab can't reach the page behind. [Confirmed]
-  - Gaps: see I3.
+  - Gaps: see I3, and I9 (focus taken back after the visitor has moved on).
 - **Screen readers:**
   - The open card is a dialog named after the item, and paging announces "Title, 2 of 9". [Confirmed in code and by attribute checks]
   - I didn't test with a real screen reader. [Uncertain]
@@ -315,7 +367,7 @@ Import `zoom.css` for the default look, or `zoom.base.css` to style everything y
 
 | File | What it is |
 |---|---|
-| `review/independent-review/zoom-demo.html` | The double-click demo: 9 labelled scenarios, each with a checklist and a "Copy results" button |
+| `review/independent-review/zoom-demo.html` | The double-click demo: 9 labelled scenarios, each with a checklist, a page-turn timing switch, a general-notes box and a "Copy results" button |
 | `review/independent-review/review-report.md` | This report |
 | `review/independent-review/evidence/*.png` | Screenshots referenced above |
 | `review/independent-review/probes/*.mjs` | The browser probes behind each [Confirmed] finding |
@@ -324,4 +376,4 @@ Import `zoom.css` for the default look, or `zoom.base.css` to style everything y
 To re-run:
 - `npm --prefix review/harness install`. Don't also run the root `npm install`; see I8.
 - `node review/independent-review/build.mjs`.
-- `node review/independent-review/probes/findings.mjs`, and likewise `perf.mjs`, `first-open-network.mjs`, `sticky.mjs` and `demo-check.mjs`.
+- `node review/independent-review/probes/findings.mjs`, and likewise `perf.mjs`, `first-open-network.mjs`, `sticky.mjs`, `round2.mjs`, `turnaround.mjs` and `demo-check.mjs`.

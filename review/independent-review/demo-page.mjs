@@ -15,6 +15,7 @@ const SCENARIOS = [
       { k: "look", t: "The motion feels good to you: speed, slight bounce, the way the card grows out of the picture." },
       { k: "bug", t: "At the moment you click, the other thumbnails on the page blink out (most visible on the second row), and stay hidden until the card has closed." },
       { k: "bug", t: "In slow motion, the ✕ button can be seen floating just outside the top-right of the growing card during the first part of the opening." },
+      { k: "look", t: "Page turns (← →): try the “Page turn” switch at the top of this page. Which setting feels right on your display? (Say which in the note.)" },
     ],
   },
   {
@@ -183,6 +184,7 @@ button.primary { background: var(--accent); color: var(--bg); border-color: var(
 .help ul { margin: 4px 0; padding-left: 20px; }
 .results { margin-top: 40px; padding: 20px; border: 2px solid var(--accent); border-radius: 16px; background: var(--surface); }
 .results h2 { margin-top: 0; font-size: 1.2rem; }
+.results textarea.general { min-height: 100px; font: inherit; font-size: 0.92rem; margin-bottom: 8px; }
 .results textarea { width: 100%; min-height: 160px; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); }
 .results .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
 .copied { color: var(--ok); font-weight: 600; }
@@ -193,6 +195,7 @@ button.primary { background: var(--accent); color: var(--bg); border-color: var(
 <div class="top"><div class="wrap">
   <h1>Zoom library demo</h1>
   <label>Speed <select id="speed"><option value="1">Normal</option><option value="0.3">Slow motion (×0.3)</option><option value="0.1">Very slow (×0.1)</option></select></label>
+  <label>Page turn <select id="pageTiming"><option value="">Library default (0.5 s)</option><option value="0.35">0.35 s, no bounce</option><option value="0.3b">0.3 s, slight bounce</option></select></label>
   <nav>${SCENARIOS.map((s) => `<a href="#s-${s.id}">${s.title.split(". ")[0]}</a>`).join("")}<a href="#help">Reduced motion help</a><a href="#results">Results</a></nav>
 </div></div>
 <div class="wrap">
@@ -217,6 +220,8 @@ ${sections}
     <h2>Results</h2>
     <p>Optional: which browser and device you used.</p>
     <div class="row"><input type="text" class="note" id="env" placeholder="e.g. Safari on MacBook Air, iPhone 13" aria-label="Browser and device"></div>
+    <p>Anything else: general notes, ideas, things the checklist didn't ask about.</p>
+    <textarea id="general" class="general" aria-label="General notes" placeholder="General notes"></textarea>
     <div class="row"><button type="button" class="primary" id="copy">Copy results</button><span id="copied" class="copied" aria-live="polite"></span></div>
     <textarea id="out" readonly aria-label="Results text"></textarea>
   </section>
@@ -227,8 +232,13 @@ const SCENARIOS = ${JSON.stringify(SCENARIOS.map((s) => ({ id: s.id, title: s.ti
 // Simulated reduced motion: the library reads window.matchMedia, so answer "reduce" to it.
 const REDUCED_STUB = "(function(){var m=window.matchMedia.bind(window);window.matchMedia=function(q){if(/prefers-reduced-motion:\\\\s*reduce/.test(q)){return{matches:true,media:q,onchange:null,addEventListener:function(){},removeEventListener:function(){},addListener:function(){},removeListener:function(){},dispatchEvent:function(){return false}}}return m(q)}})();";
 const speedEl = document.getElementById("speed");
+const pageEl = document.getElementById("pageTiming");
+// Passed to the provider as its timing.page prop (a public option; the library itself is unchanged).
+const PAGE_TIMINGS = { "0.35": { duration: 0.35, bounce: 0 }, "0.3b": { duration: 0.3, bounce: 0.1 } };
 function stageHtml(id, reduced) {
   const cfg = { scenario: id, timeScale: +speedEl.value, simulatedReduced: reduced };
+  const pt = PAGE_TIMINGS[pageEl.value];
+  if (pt) cfg.props = { timing: { page: pt } };
   if (id === "slow") cfg.slowMs = 1500;
   return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>' + id + '</title></head><body><div id="app"></div><script>' + (reduced ? REDUCED_STUB : "") + 'window.ZD=' + JSON.stringify(cfg) + ';<\\/script><script>' + BUNDLE.replace(/<\\/script/gi, "<\\\\/script") + '<\\/script></body></html>';
 }
@@ -239,7 +249,9 @@ const frames = [...document.querySelectorAll("iframe.stage")];
 // Load each frame when it comes near the screen, so the page opens quickly.
 const io = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting && !e.target.dataset.url) load(e.target); }), { rootMargin: "400px" });
 frames.forEach((f) => io.observe(f));
-speedEl.addEventListener("change", () => frames.forEach((f) => { if (f.dataset.url) load(f); }));
+const reloadAll = () => frames.forEach((f) => { if (f.dataset.url) load(f); });
+speedEl.addEventListener("change", reloadAll);
+pageEl.addEventListener("change", reloadAll);
 document.addEventListener("click", (e) => {
   const t = e.target.closest("button"); if (!t) return;
   if (t.dataset.reload) load(document.querySelector('iframe[data-scenario="' + t.dataset.reload + '"]'));
@@ -256,8 +268,9 @@ document.querySelectorAll(".check").forEach((li) => {
   if (v.n) li.querySelector(".note").value = v.n;
 });
 if (saved.env) document.getElementById("env").value = saved.env;
+if (saved.general) document.getElementById("general").value = saved.general;
 function collect() {
-  const data = { env: document.getElementById("env").value };
+  const data = { env: document.getElementById("env").value, general: document.getElementById("general").value.trim() };
   document.querySelectorAll(".check").forEach((li) => {
     const a = li.querySelector("input[type=radio]:checked"); const n = li.querySelector(".note").value.trim();
     data[li.dataset.key] = { a: a ? a.value : "", n };
@@ -276,6 +289,8 @@ function render() {
     });
     lines.push("");
   });
+  lines.push("Page-turn setting in use: " + pageEl.options[pageEl.selectedIndex].text);
+  if (d.general) lines.push("", "General notes:", d.general);
   document.getElementById("out").value = lines.join("\\n");
 }
 document.addEventListener("input", render);
