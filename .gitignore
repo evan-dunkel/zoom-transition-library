@@ -1,5 +1,6 @@
-node_modules/
+node_modules
 .DS_Store
 __MACOSX/
 review/harness/dist/
+review/harness/shots/
 review/harness/test-results/
