@@ -1,9 +1,15 @@
 import { cancelFrame, frame, motionValue, type MotionValue } from "motion/react";
 import { clamp } from "./springs";
 
-export type Rect = { x: number; y: number; w: number; h: number };
+/** Corner radii in px, clockwise from top-left (as in CSS): top-left, top-right, bottom-right, bottom-left. */
+export type Corners = [number, number, number, number];
 
-type Fit = { s: number; cx: number; cy: number; ix: number; iy: number };
+/** A box on screen. r: its corner radii on screen (px); left out, the hero's own radii are used. */
+export type Rect = { x: number; y: number; w: number; h: number; r?: number | Corners };
+
+type Fit = { s: number; cx: number; cy: number; ix: number; iy: number; r: Corners };
+
+const corners = (r: number | Corners): Corners => (typeof r === "number" ? [r, r, r, r] : r);
 
 export type Flight = {
   cx: MotionValue<number>;
@@ -19,13 +25,24 @@ export type Flight = {
   retarget(next: Rect): void;
   /** Re-apply the extra offset (e.g. after the card's content scrolled). */
   invalidate(): void;
+  /** What the copy shows right now: its visible box and corner radii, in the layer's coordinates (px). */
+  visible(): { x: number; y: number; w: number; h: number; r: Corners };
   destroy(): void;
 };
 
 export type HeroMetrics = {
   W0: number;
   H0: number;
-  radius: number;
+  /**
+   * When the hero is just one image (an <img>, <video> or SVG filling its box, cropped
+   * to fit like object-fit: cover), the box that shows the *whole* picture: the hero's
+   * box widened or heightened to the picture's own shape. The flight carries that whole
+   * picture and crops it, so the crop changes smoothly from the thumbnail's to the
+   * hero's instead of starting from a crop of a crop.
+   */
+  fill: { W: number; H: number } | null;
+  /** The hero's own corner radii (its first child's, if it has none). */
+  radius: Corners;
   /** The hero's own box-shadow ("none" if it has none) and corner radius, for the flight's shadow layer. */
   shadow: string;
   shadowRadius: string;
@@ -37,8 +54,44 @@ const OUTSIDE = 10000;
 /** Read everything a flight needs from the hero, in one go, before anything is written. */
 export function measureHero(hero: HTMLElement): HeroMetrics {
   const cs = getComputedStyle(hero);
-  return { W0: hero.offsetWidth, H0: hero.offsetHeight, radius: readRadius(hero), shadow: cs.boxShadow, shadowRadius: cs.borderRadius };
+  const W0 = hero.offsetWidth;
+  const H0 = hero.offsetHeight;
+  const a = mediaAspect(hero);
+  const fill = a && W0 >= 1 && H0 >= 1 && Math.abs(a - W0 / H0) > 0.01 ? (a > W0 / H0 ? { W: H0 * a, H: H0 } : { W: W0, H: W0 / a }) : null;
+  return { W0, H0, fill, radius: readCorners(hero), shadow: cs.boxShadow, shadowRadius: cs.borderRadius };
 }
+
+/** The one image a hero consists of, or null if it has anything else (text, several images). */
+function heroMedia(hero: HTMLElement) {
+  if (hero.textContent?.trim()) return null;
+  const media = [...hero.querySelectorAll<HTMLElement | SVGSVGElement>("img, video, svg, canvas")].filter(
+    (m) => !m.parentElement?.closest("svg"),
+  );
+  return media.length === 1 ? media[0] : null;
+}
+/** The shape (width / height) of a hero's whole picture, when it's a single image cropped to cover its box. */
+function mediaAspect(hero: HTMLElement): number | null {
+  const m = heroMedia(hero);
+  if (!m) return null;
+  if (m instanceof HTMLImageElement || m instanceof HTMLVideoElement) {
+    const w = m instanceof HTMLImageElement ? m.naturalWidth : m.videoWidth;
+    const h = m instanceof HTMLImageElement ? m.naturalHeight : m.videoHeight;
+    return w && h && getComputedStyle(m).objectFit === "cover" ? w / h : null;
+  }
+  if (m instanceof SVGSVGElement) {
+    const vb = m.viewBox.baseVal;
+    return vb && vb.width && vb.height && m.preserveAspectRatio.baseVal.meetOrSlice === SVGPreserveAspectRatio.SVG_MEETORSLICE_SLICE
+      ? vb.width / vb.height
+      : null;
+  }
+  return null;
+}
+
+/**
+ * A hero with no size yet (typically an image still downloading, with no width/height
+ * or aspect-ratio to reserve its space) can't be flown: there is nothing to scale.
+ */
+export const canFly = (m: HeroMetrics) => m.W0 >= 1 && m.H0 >= 1;
 
 /**
  * The still copy that flies. Live heroes only show it for the frame or so before
@@ -91,15 +144,21 @@ export function createFlight(
     shadowOpacity?: () => number;
   } = {},
 ): Flight {
-  const { W0, H0, radius, shadow, shadowRadius } = opts.metrics ?? measureHero(hero);
+  const m = opts.metrics ?? measureHero(hero);
+  const { radius, shadow, shadowRadius } = m;
+  // The flying box: the whole picture when the hero is a single image, else the hero's own box.
+  const W0 = m.fill ? m.fill.W : m.W0;
+  const H0 = m.fill ? m.fill.H : m.H0;
   const fit = (r: Rect): Fit => {
-    const s = Math.max(r.w / W0, r.h / H0);
+    const s = Math.max(r.w / W0, r.h / H0, 1e-6);
     return {
       s,
       cx: r.x + r.w / 2,
       cy: r.y + r.h / 2,
       ix: Math.max(0, (W0 - r.w / s) / 2),
       iy: Math.max(0, (H0 - r.h / s) / 2),
+      // On screen, so the corners can blend from the source's radii to the hero's.
+      r: r.r !== undefined ? corners(r.r) : (radius.map((v) => v * Math.max(r.w / m.W0, r.h / m.H0)) as Corners),
     };
   };
   let A = fit(from);
@@ -136,6 +195,15 @@ export function createFlight(
     liveHost.style.cssText = `position:absolute;left:0;top:0;width:100%;height:100%;margin:0;${shade ? "box-shadow:none;" : ""}`;
     el.appendChild(liveHost);
   }
+  if (m.fill) {
+    // The whole picture fills the flying box (it was cropped to the hero's box before).
+    el.dataset.zoomFill = "";
+    const media = heroMedia(copy);
+    for (let n: Element | null = media; n && n !== copy; n = n.parentElement) {
+      (n as HTMLElement).style.width = "100%";
+      (n as HTMLElement).style.height = "100%";
+    }
+  }
   layer.appendChild(el);
 
   const cx = motionValue(A.cx);
@@ -144,12 +212,15 @@ export function createFlight(
 
   const crop = (sv: number) => {
     const t = A.s === B.s ? 1 : clamp((sv - A.s) / (B.s - A.s), 0, 1);
-    return { ix: A.ix + (B.ix - A.ix) * t, iy: A.iy + (B.iy - A.iy) * t };
+    return { ix: A.ix + (B.ix - A.ix) * t, iy: A.iy + (B.iy - A.iy) * t, r: A.r.map((a, i) => a + (B.r[i] - a) * t) as Corners };
   };
   const write = () => {
     scheduled = false;
     const sv = s.get();
-    const { ix, iy } = crop(sv);
+    const { ix, iy, r } = crop(sv);
+    // The corner radii in the copy's own (unscaled) units.
+    const radii = r.map((v) => (v > 0.25 && sv > 0 ? v / sv : 0));
+    const round = Math.max(...radii);
     const o = opts.offset ? opts.offset() : { x: 0, y: 0 };
     const left = cx.get() + o.x - (W0 * sv) / 2;
     const top = cy.get() + o.y - (H0 * sv) / 2;
@@ -159,8 +230,9 @@ export function createFlight(
     // anything the hero paints outside its own box (a shadow, a cover swung open
     // in 3D, a glow), so every side that isn't being cropped is pushed far out
     // (negative inset) instead of sitting on the box edge.
-    const cropX = ix > 0.5;
-    const cropY = iy > 0.5;
+    // Rounded corners have to sit on the box's edges, so rounding clips every side.
+    const cropX = ix > 0.5 || round > 0;
+    const cropY = iy > 0.5 || round > 0;
     let it = cropY ? iy : -OUTSIDE;
     let ib = cropY ? iy : -OUTSIDE;
     const band = opts.clip ? opts.clip() : null;
@@ -171,7 +243,7 @@ export function createFlight(
     const ixs = cropX ? ix : -OUTSIDE;
     el.style.clipPath =
       cropX || it > -OUTSIDE || ib > -OUTSIDE
-        ? `inset(${it}px ${ixs}px ${ib}px ${ixs}px${cropX || cropY ? ` round ${radius}px` : ""})`
+        ? `inset(${it}px ${ixs}px ${ib}px ${ixs}px${round > 0 ? ` round ${radii.map((v) => `${v}px`).join(" ")}` : ""})`
         : "";
   };
   // Three values change each frame; write the style once, in Motion's render step.
@@ -194,6 +266,18 @@ export function createFlight(
       copy.remove();
     },
     invalidate: () => schedule(),
+    visible() {
+      const sv = s.get();
+      const { ix, iy, r } = crop(sv);
+      const o = opts.offset ? opts.offset() : { x: 0, y: 0 };
+      return {
+        x: cx.get() + o.x - (W0 * sv) / 2 + ix * sv,
+        y: cy.get() + o.y - (H0 * sv) / 2 + iy * sv,
+        w: (W0 - 2 * ix) * sv,
+        h: (H0 - 2 * iy) * sv,
+        r,
+      };
+    },
     retarget(next) {
       const sv = s.get();
       A = { s: sv, cx: cx.get(), cy: cy.get(), ...crop(sv) };
@@ -210,10 +294,20 @@ export function createFlight(
   return flight;
 }
 
-function readRadius(hero: HTMLElement) {
-  const target = (hero.firstElementChild as HTMLElement | null) ?? hero;
-  const value = getComputedStyle(target).borderTopLeftRadius;
-  return value.endsWith("px") ? parseFloat(value) : 0;
+/** An element's corner radii in px: its own, or (if it has none) its first child's, e.g. a rounded <img>. */
+export function readCorners(el: HTMLElement): Corners {
+  const own = cornersOf(el);
+  if (own.some((v) => v > 0)) return own;
+  const child = el.firstElementChild as HTMLElement | null;
+  return child ? cornersOf(child) : own;
+}
+function cornersOf(el: HTMLElement): Corners {
+  const cs = getComputedStyle(el);
+  const px = (value: string) => {
+    const v = value.split(" ")[0];
+    return v.endsWith("%") ? (parseFloat(v) / 100) * Math.min(el.offsetWidth, el.offsetHeight) : parseFloat(v) || 0;
+  };
+  return [px(cs.borderTopLeftRadius), px(cs.borderTopRightRadius), px(cs.borderBottomRightRadius), px(cs.borderBottomLeftRadius)];
 }
 
 const MAX_FROZEN = 300;

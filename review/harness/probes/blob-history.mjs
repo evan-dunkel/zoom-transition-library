@@ -1,0 +1,15 @@
+import { launch } from "./lib.mjs";
+import { pathToFileURL } from "node:url";
+const browser = await launch();
+const page = await browser.newPage();
+page.on("framenavigated", (f) => f === page.mainFrame() && console.log("MAIN navigated:", f.url().slice(0, 50)));
+await page.goto("data:text/html,<p>previous site</p>");
+await page.goto(pathToFileURL(process.cwd() + "/../demo/zoom-demo.html").href);
+await page.locator("#s-rapid").scrollIntoViewIfNeeded(); await page.waitForTimeout(800);
+const fr = await (await page.$('iframe[data-scenario="rapid"]')).contentFrame();
+console.log("iframe url:", fr.url().slice(0, 40), "history.length:", await fr.evaluate(() => history.length));
+console.log("pushState:", await fr.evaluate(() => { try { history.pushState({}, "", "#x"); return "ok " + location.href.slice(-20) + " len " + history.length; } catch (e) { return "ERR " + e.message.slice(0, 100); } }));
+await fr.evaluate(() => history.back());
+await page.waitForTimeout(500);
+console.log("after back: main", page.url().slice(-20), "frame", await fr.evaluate(() => location.href.slice(-25)).catch((e) => "detached"));
+await browser.close();
