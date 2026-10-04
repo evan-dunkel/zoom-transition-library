@@ -90,6 +90,9 @@
 .zoom-root[data-phase="opening"] .zoom-close-bar,
 .zoom-root[data-phase="closing"] .zoom-close-bar { opacity: 0; }
 .zoom-root[data-phase="open"] .zoom-close-bar { transition: opacity 100ms ease-out; }
+/* closeButtonTiming="flight": a copy of the button fades with the flight, so the real one
+   switches over without a fade of its own. */
+.zoom-root[data-close-sync] .zoom-close-bar { transition: none; }
 @media (prefers-reduced-motion: reduce) { .zoom-root .zoom-close-bar { transition: none; } }
 /* Focus returned after a card opened by mouse or touch: no ring until a key is pressed.
    If your focus ring isn't an outline (e.g. a box-shadow), add it to this rule too. */

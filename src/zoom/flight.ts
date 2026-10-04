@@ -25,6 +25,8 @@ export type Flight = {
   retarget(next: Rect): void;
   /** Re-apply the extra offset (e.g. after the card's content scrolled). */
   invalidate(): void;
+  /** What the copy shows right now: its visible box and corner radii, in the layer's coordinates (px). */
+  visible(): { x: number; y: number; w: number; h: number; r: Corners };
   destroy(): void;
 };
 
@@ -264,6 +266,18 @@ export function createFlight(
       copy.remove();
     },
     invalidate: () => schedule(),
+    visible() {
+      const sv = s.get();
+      const { ix, iy, r } = crop(sv);
+      const o = opts.offset ? opts.offset() : { x: 0, y: 0 };
+      return {
+        x: cx.get() + o.x - (W0 * sv) / 2 + ix * sv,
+        y: cy.get() + o.y - (H0 * sv) / 2 + iy * sv,
+        w: (W0 - 2 * ix) * sv,
+        h: (H0 - 2 * iy) * sv,
+        r,
+      };
+    },
     retarget(next) {
       const sv = s.get();
       A = { s: sv, cx: cx.get(), cy: cy.get(), ...crop(sv) };

@@ -13,7 +13,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { MotionConfigContext, motion, motionValue, useMotionValue, type MotionValue } from "motion/react";
+import { MotionConfigContext, cancelFrame, frame, motion, motionValue, useMotionValue, type MotionValue } from "motion/react";
 import { REST, clamp, defaultTiming, settle, springTo, type ZoomTiming } from "./springs";
 import {
   canFly,
@@ -216,6 +216,13 @@ export type ZoomProviderProps = {
   /** Accessible name for each destination card. */
   getLabel?: (id: string) => string;
   closeLabel?: string;
+  /**
+   * When the close button appears and disappears.
+   * - "after" (default): hidden while the image flies, fading in quickly once it lands.
+   * - "flight": fades in and out with the flight itself (its opacity follows the card's
+   *   progress), drawn above the flying image so it's never covered.
+   */
+  closeButtonTiming?: "after" | "flight";
 };
 
 type Phase = "idle" | "opening" | "open" | "closing";
@@ -267,7 +274,16 @@ type Item = {
   api: ItemApi;
   /** The card's scale when sitting on its source. */
   sLand: number;
+  /** The hero's box in its card (card units, at full size), for clipping the card around the flying image. */
+  heroSlot: Box | null;
+  /** The card's clip runs from clipA to clipB as its progress goes from one p to the other (e: 0 = hugging the image, 1 = whole card). */
+  clipA: { p: number; e: number };
+  clipB: { p: number; e: number };
+  clipE: number;
+  clipOn: boolean;
+  cardRadius: Corners | null;
 };
+type Box = { x: number; y: number; w: number; h: number };
 
 const defaultGeometry: ZoomGeometry = { side: 18, gap: 8, top: 24, bottom: 14, maxCardWidth: 720 };
 
@@ -636,6 +652,10 @@ export function ZoomProvider(props: ZoomProviderProps) {
     flyVisible: false,
     /** Page elements this provider made inert while open (to give back on close). */
     inerted: [] as HTMLElement[],
+    /** The per-frame card clip loop is running. */
+    clipLoop: false,
+    /** The visible card's close button and its place in the card (card units), for closeButtonTiming "flight". */
+    closeOff: null as { el: HTMLElement; x: number; y: number } | null,
     /** The last kind of input on the page, and whether this session was opened by pointer. */
     input: "keyboard" as "keyboard" | "pointer",
     pointerOpened: false,
@@ -699,6 +719,12 @@ export function ZoomProvider(props: ZoomProviderProps) {
         landed: false,
         offOpacity: null,
         sLand: NaN,
+        heroSlot: null,
+        clipA: { p: 0, e: 0 },
+        clipB: { p: 1, e: 1 },
+        clipE: 1,
+        clipOn: false,
+        cardRadius: null,
       };
       items.current.set(id, it);
       const self = it;
@@ -1026,7 +1052,135 @@ export function ZoomProvider(props: ZoomProviderProps) {
     it.flightTrack0 = null;
     flight.destroy();
     liveFlights.current?.remove(it.id, flight);
+    // The card is whole again.
+    it.clipOn = false;
+    const card = cardEls.current.get(it.id);
+    if (card) card.style.clipPath = "";
     updateProgress(it);
+    stopClipLoopIfIdle();
+  }
+
+  /* -------------------------------------------------------------- the card around the flying image */
+
+  /**
+   * While a hero flies, its card is clipped to hug the flying image and grows out from it
+   * (a container transform): at the source the card shows only behind the image, and its
+   * margins, corners and the content below open out as it goes. The card's hero slot has
+   * the hero's shape while the image's visible window morphs between the thumbnail's
+   * shape and the hero's, so without this the card showed bands beside the image.
+   */
+  const aimClip = (it: Item, toOpen: boolean, heroSlot: Box | null) => {
+    if (!heroSlot || !S.L || S.L.stream) return;
+    it.heroSlot = heroSlot;
+    const card = cardEls.current.get(it.id);
+    if (card && !it.cardRadius) it.cardRadius = readCorners(card);
+    const p0 = progressOf(it);
+    const p = Number.isFinite(p0) ? clamp(p0, 0, 1) : toOpen ? 0 : 1;
+    it.clipA = { p, e: it.clipOn ? it.clipE : toOpen ? 0 : 1 };
+    it.clipB = toOpen ? { p: 1, e: 1 } : { p: 0, e: 0 };
+    it.clipOn = true;
+    startClipLoop();
+  };
+  const clipCard = (it: Item) => {
+    const card = cardEls.current.get(it.id);
+    const f = it.flight;
+    if (!card || !f || !it.clipOn || !it.heroSlot || !S.L || S.L.stream) return;
+    const { clipA: A, clipB: B } = it;
+    const p = progressOf(it);
+    const e = clamp(B.p === A.p ? B.e : A.e + ((B.e - A.e) * (p - A.p)) / (B.p - A.p), 0, 1);
+    it.clipE = e;
+    // The card's on-screen position and scale, from the same values its transform comes from.
+    const P = slot(it.j);
+    const k = zs.get() * it.cv.s.get();
+    if (!(k > 0)) return;
+    const X = zx.get() + zs.get() * (P.x + it.cv.x.get());
+    const Y = zy.get() + zs.get() * (P.y + it.cv.y.get());
+    // The flying image's window, in the card's own units.
+    const w = f.visible();
+    const l = (w.x - X) / k;
+    const t = (w.y - Y) / k;
+    const r = (w.x + w.w - X) / k;
+    const b = (w.y + w.h - Y) / k;
+    // Each side starts at the image's edge and opens out to the card's own edge.
+    const hs = it.heroSlot;
+    const cw = S.L.cardW;
+    const ch = S.L.cardH;
+    const inset = [
+      Math.max(0, t - hs.y * e),
+      Math.max(0, cw - r - (cw - hs.x - hs.w) * e),
+      Math.max(0, ch - b - (ch - hs.y - hs.h) * e),
+      Math.max(0, l - hs.x * e),
+    ];
+    const cr = it.cardRadius ?? [0, 0, 0, 0];
+    const radii = w.r.map((v, i) => (v / k) * (1 - e) + cr[i] * e);
+    card.style.clipPath =
+      e >= 0.999 ? "" : `inset(${inset.map((v) => `${v}px`).join(" ")} round ${radii.map((v) => `${v}px`).join(" ")})`;
+  };
+
+  /** closeButtonTiming "flight": a still copy of the close button above the flying image, fading with it. */
+  const closeCopy = useRef<HTMLElement | null>(null);
+  const measureClose = (id: string) => {
+    const card = cardEls.current.get(id);
+    const btn = card?.querySelector<HTMLElement>(".zoom-close-bar > *");
+    if (!card || !btn) return null;
+    const br = btn.getBoundingClientRect();
+    const cr = card.getBoundingClientRect();
+    const k = cr.width / card.offsetWidth || 1;
+    return { el: btn, x: (br.left - cr.left) / k, y: (br.top - cr.top) / k };
+  };
+  const dropCloseCopy = () => {
+    closeCopy.current?.remove();
+    closeCopy.current = null;
+  };
+  const moveCloseCopy = () => {
+    const it = items.current.get(S.ids[S.index]);
+    const off = S.closeOff;
+    if (latest.current.closeButtonTiming !== "flight" || !it || !it.flight || !it.clipOn || !off || !S.L) {
+      dropCloseCopy();
+      return;
+    }
+    let el = closeCopy.current;
+    if (!el) {
+      el = prepareSnapshot(off.el).cloneNode(true) as HTMLElement;
+      el.removeAttribute("data-zoom-close");
+      el.setAttribute("aria-hidden", "true");
+      el.tabIndex = -1;
+      el.style.inset = "auto";
+      el.style.left = "0";
+      el.style.top = "0";
+      el.style.margin = "0";
+      el.style.transformOrigin = "0 0";
+      el.style.pointerEvents = "none";
+      el.style.zIndex = "1";
+      el.classList.add("zoom-close-copy");
+      flightRef.current?.appendChild(el);
+      closeCopy.current = el;
+    }
+    const P = slot(it.j);
+    const k = zs.get() * it.cv.s.get();
+    const X = zx.get() + zs.get() * (P.x + it.cv.x.get());
+    const Y = zy.get() + zs.get() * (P.y + it.cv.y.get());
+    el.style.transform = `translate(${X + k * off.x}px, ${Y + k * off.y}px) scale(${k})`;
+    el.style.opacity = String(clamp(progressOf(it), 0, 1));
+  };
+
+  // One loop per frame while any card flies, in Motion's render step (after the values update).
+  const clipFrameRef = useRef<() => void>(() => {});
+  clipFrameRef.current = () => {
+    items.current.forEach(clipCard);
+    moveCloseCopy();
+  };
+  const clipTick = useRef(() => clipFrameRef.current()).current;
+  const startClipLoop = () => {
+    if (S.clipLoop) return;
+    S.clipLoop = true;
+    frame.render(clipTick, true);
+  };
+  function stopClipLoopIfIdle() {
+    for (const it of items.current.values()) if (it.flight) return;
+    if (S.clipLoop) cancelFrame(clipTick);
+    S.clipLoop = false;
+    dropCloseCopy();
   }
 
   /* -------------------------------------------------------------- dim & fades */
@@ -1342,6 +1496,7 @@ export function ZoomProvider(props: ZoomProviderProps) {
       heroInCard = { x: hr.left - cr.left, y: hr.top - cr.top, w: hr.width, h: hr.height };
       heroTarget = { x: at.x + heroInCard.x, y: at.y + heroInCard.y, w: hr.width, h: hr.height, r: heroCorners(id, heroInCard, pre!.metrics.radius) };
     }
+    S.closeOff = measureClose(id);
 
     const z = zoomOnto(src, at.x, at.y, heroInCard);
     S.s0 = z.s;
@@ -1367,6 +1522,7 @@ export function ZoomProvider(props: ZoomProviderProps) {
     if (hero && heroTarget && pre) {
       it.srcFit = fitOf(pre.metrics, src);
       const f = startFlight(it, hero, src, heroTarget, pre, trackAt(S.index));
+      aimClip(it, true, heroInCard);
       anims.push(
         springTo(f.cx, f.to.cx, T.open, { speed: sp }),
         springTo(f.cy, f.to.cy, T.open, { speed: sp }),
@@ -1593,6 +1749,7 @@ export function ZoomProvider(props: ZoomProviderProps) {
         ];
       }),
     );
+    S.closeOff = measureClose(S.ids[index]);
     S.mode = "cards";
     const velocities = bake(zoomVelocity);
     updateAllProgress();
@@ -1695,6 +1852,7 @@ export function ZoomProvider(props: ZoomProviderProps) {
           it.flightScrollNow = it.flightScroll0 ?? 0;
           it.flightTrack0 = target === "open" ? trackAt(index) : null;
           f.retarget(heroTarget);
+          aimClip(it, target === "open", off);
           anims.push(
             springTo(f.cx, f.to.cx, spec, { velocity: vcx, restDelta: restPx, speed: sp }),
             springTo(f.cy, f.to.cy, spec, { velocity: vcy, restDelta: restPx, speed: sp }),
@@ -1703,6 +1861,7 @@ export function ZoomProvider(props: ZoomProviderProps) {
         } else {
           const from = wasLanded ? dest : m.heroRect!;
           startFlight(it, hero, from, heroTarget, m.pre ?? prepareFlight(id, hero), target === "open" ? trackAt(index) : null);
+          aimClip(it, target === "open", off);
           // The hero was moving with its card: its centre's speed follows from the card's.
           const f = it.flight!;
           const fvx = wasLanded ? 0 : toward(cvx + cvs * (off.x + off.w / 2), f.to.cx - f.cx.get());
@@ -2157,6 +2316,7 @@ export function ZoomProvider(props: ZoomProviderProps) {
       <div
         ref={rootRef}
         className={["zoom-root", fixed && "zoom-fixed", layout?.vertical && "zoom-vertical"].filter(Boolean).join(" ")}
+        data-close-sync={props.closeButtonTiming === "flight" ? "" : undefined}
         role="dialog"
         aria-modal="true"
         // Named after the visible item, so a screen reader says what opened.

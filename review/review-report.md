@@ -61,6 +61,16 @@ All changes are in the library (`src/zoom/`), which your site will use. The demo
 
 All 31 browser tests pass: 29 behaviour checks, plus the 2 known limitations, which fail as expected.
 
+### Round 5: final fixes
+
+| Your note | What changed |
+|---|---|
+| Image crop still jumps; aspect not changing smoothly | Frame-by-frame traces showed the flying image itself *was* changing shape smoothly and landing on exactly the right pixels. **What jumped was the card behind it.** The card's image slot always has the hero's shape (16:10), while the image changes from the thumbnail's shape (4:3), so white bands showed beside the image. **Fixed with a container transform:** while an image flies, its card is clipped to hug it. Each side starts at the image's edge and opens out to the card's edge, and the corners and the content below grow out from it too. A test checks the card's visible sides match the image's sides on every frame. Inset images (your layout) get their margins growing smoothly from zero. |
+| Option to sync ✕ opacity to the flight | **New prop `closeButtonTiming`:** `"after"` (default: fades in over 100 ms after landing) or `"flight"`. With `"flight"`, a copy of the button is drawn above the flying image (the real one sits under it), with its opacity following the card's progress. On landing it hands over to the real button in exactly the same spot, which a test checks. The demo has a switch for it in the top bar. |
+| Is the library headless for styling? | Not fully; see the README's Styling section. |
+
+All 33 browser tests pass: 31 behaviour checks, plus the 2 known limitations, which fail as expected.
+
 ### Recommended setup for a portfolio on Cloudflare: Astro
 
 **Use [Astro](https://astro.build) with its React integration**, and build it as a static site:

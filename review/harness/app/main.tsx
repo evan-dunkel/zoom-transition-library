@@ -14,6 +14,8 @@ type Config = {
   /** Test-only: fly the hero as a still snapshot (ZoomHero live={false}). */
   heroLive?: boolean;
   timeScale?: number;
+  /** The provider's closeButtonTiming. */
+  closeTiming?: "after" | "flight";
   /** Shown in the status bar when the reduced-motion media query is being simulated. */
   simulatedReduced?: boolean;
   /** Test-only provider overrides. */
@@ -329,17 +331,19 @@ const filler = (n: number) =>
 
 function App() {
   const [timeScale, setTimeScale] = useState(config.timeScale ?? 1);
+  const [closeTiming, setCloseTiming] = useState(config.closeTiming ?? "after");
   useEffect(() => {
     window.__zoomDemo = { setTimeScale: (v) => { config.timeScale = v; setTimeScale(v); } };
     const onMsg = (e: MessageEvent) => {
       if (e.data && e.data.type === "zoom-demo-timescale") window.__zoomDemo!.setTimeScale(e.data.value);
+      if (e.data && e.data.type === "zoom-demo-close-timing") setCloseTiming(e.data.value);
     };
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
   }, []);
 
   const s = config.scenario;
-  const base: Partial<ZoomProviderProps> = { timeScale, getLabel: (id) => byId.get(id)?.title ?? id };
+  const base: Partial<ZoomProviderProps> = { timeScale, closeButtonTiming: closeTiming, getLabel: (id) => byId.get(id)?.title ?? id };
   const provider = (render: (id: string) => ReactNode, extra: Partial<ZoomProviderProps> = {}) => ({
     ...base,
     renderDestination: render,

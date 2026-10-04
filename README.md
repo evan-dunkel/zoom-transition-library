@@ -58,12 +58,28 @@ function Project({ id }) {
 | | |
 |---|---|
 | Open / close | Click a thumbnail. Close with Esc, the ✕ button, a click on empty space outside the cards, scrolling past the card's top, or a touch drag down. The narrow gap between two cards does nothing, and clicking a neighbour that's peeking in switches to it. Tapping a card while it flies home reopens it. The ✕ fades in once the image has landed. A window resize mid-transition finishes the transition at once. |
-| The flight | The image flies from the thumbnail to its spot in the card. Each corner blends from the thumbnail's radius to the one it ends with: the card's own rounded corner, where the image meets it. If the hero is a single image (an `img`/`video` with `object-fit: cover`, or an SVG set to `slice`), the whole picture flies and its crop changes smoothly from the thumbnail's to the hero's. Thumbnail and hero should show the same picture, both centred. |
+| The flight | The image flies from the thumbnail to its spot in the card. Each corner blends from the thumbnail's radius to the one it ends with: the card's own rounded corner, where the image meets it. If the hero is a single image (an `img`/`video` with `object-fit: cover`, or an SVG set to `slice`), the whole picture flies and its crop changes smoothly from the thumbnail's to the hero's. Thumbnail and hero should show the same picture, both centred. While the image flies, its card is clipped around it and grows out from it, so the card never shows beside the image. |
+| Close button | `closeButtonTiming="after"` (default): hidden while the image flies, fades in over 100 ms once it lands. `"flight"`: fades in and out with the flight, drawn above the flying image. |
 | Group | Thumbnails in the same `group` become a pager. Use ← → or a touch swipe to move between them. `paging={false}` shows only the opened item. |
 | Mouse | A mouse never drags cards. Pressing and dragging selects text. |
 | Reduced motion | Instant: no movement, no fade. Follows the device setting live, or `<MotionConfig reducedMotion="always">`. |
 | Keyboard / screen readers | Focus moves to ✕ on open and back to the thumbnail on close (without a visible ring if the card was opened by mouse or touch, until the next key press; if your ring is a box-shadow, add it to the `[data-zoom-quiet-focus]` rule in `zoom.css`). The page behind is made `inert` while open. The dialog is named by `getLabel`. Arrow keys inside text fields are left alone. |
 | History | With `history`, opening sets the address and Back closes. Give each item a real page at that address, so reloads and shared links work. |
+
+## Styling
+
+The library is **not fully headless**: it ships `zoom.css`, which you need. The CSS splits into two kinds:
+
+- **Structure (required).** The overlay, the card layers, scrolling, the sticky close bar, hiding sources and the flying copies. Without it nothing positions correctly.
+- **Look (defaults you can change).** These have defaults you can override:
+  - **Card:** `--zoom-card-bg`, `--zoom-card-color` and `--zoom-card-radius`.
+  - **Dimmed backdrop:** colour from `--zoom-dim-color`; strength from the `dim` prop.
+  - **Close button:** `--zoom-close-bg`, `--zoom-close-color` and `--zoom-focus`. To replace the button entirely, use `closeButton={(close) => <YourButton />}`; to hide it, `closeButton={false}`.
+  - **Layout:** card spacing and maximum width come from the `geometry` prop.
+
+  You can also restyle the library's classes (`.zoom-card`, `.zoom-close`, `.zoom-dim`, …) from your own CSS.
+
+Everything inside a card is yours: whatever `renderDestination` returns, styled however you like. What you can't change is the card's own markup, `article.zoom-card > .zoom-card-scroll > .zoom-card-content`.
 
 ## Scripts
 

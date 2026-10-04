@@ -18,7 +18,7 @@ const SCENARIOS = [
       { k: "fixed", s: "Empty space closes; the narrow gap between projects does nothing", t: "Click anywhere outside the cards, including the empty side next to the first or last project: the card closes. Clicking the narrow gap between two projects does nothing, so a near miss doesn’t close it. Click a neighbouring project that peeks in at the side: it slides over to that project." },
       { k: "fixed", s: "Esc after a mouse open leaves no focus ring", t: "Open with the mouse, close with Esc: focus goes back to the thumbnail without a focus ring, and the ring appears once you press Tab. Open with the keyboard (Tab, then Enter) and close with Esc: the ring shows, as it should." },
       { k: "note", s: "Neighbouring projects peek in at the sides (paging)", t: "The neighbouring projects peek in at the sides, and ← → moves between them. That is the library’s default “group” behaviour; one setting (<code>paging={false}</code>) shows only the opened project instead." },
-      { k: "fixed", s: "The ✕ button fades in quickly once the image lands", t: "The ✕ button stays hidden while the image flies, then fades in quickly (100 ms) once it has landed." },
+      { k: "fixed", s: "The ✕ button: after landing, or with the flight (switch at the top)", t: "With “✕ after landing” (the default), the button stays hidden while the image flies, then fades in quickly (100 ms) once it lands. With “✕ with flight”, it fades in and out with the flight itself, drawn above the flying image, and hands over to the real button in place. The setting is <code>closeButtonTiming</code>." },
     ],
   },
   {
@@ -28,8 +28,8 @@ const SCENARIOS = [
     what: "A different layout: the detail page’s picture runs edge to edge across the top of the card, and the thumbnails are a different shape (4:3) from the detail picture (16:10).",
     notes: [
       { k: "should", s: "Picture leaves from and lands on exactly the right place", t: "The picture should leave from exactly where the card is and land exactly at the top of the detail page." },
-      { k: "fixed", s: "Each corner blends smoothly, open and close (no pop)", t: "Use Slow motion. Each corner blends from the thumbnail’s 14 px to where it ends up: the two top corners to the card’s rounded 28 px, and the two bottom corners to square. Closing does the reverse. In round 2, the top corners went square and then popped round on landing." },
-      { k: "fixed", s: "The picture's crop changes smoothly from the thumbnail's to the detail's (no jump, no dissolve)", t: "The thumbnail (4:3) and the detail picture (16:10) are cropped differently. The flight now carries the whole picture and changes the crop smoothly from the thumbnail’s to the detail’s, so the first frame looks exactly like the thumbnail and the last exactly like the detail. There’s no dissolve and no double image. This works when the image is just an image (a photo or drawing filling its box)." },
+      { k: "fixed", s: "Each corner blends smoothly, open and close (no pop)", t: "Use Slow motion. Each corner blends from the thumbnail’s 14 px to where it ends up: the two top corners to the card’s rounded 28 px, the two bottom corners to square. Closing does the reverse." },
+      { k: "fixed", s: "The image's shape changes smoothly, and the card grows out from it", t: "The thumbnail (4:3) and the detail picture (16:10) are cropped differently. The flying image changes smoothly from one shape to the other, and the card now hugs it all the way, growing out from the image instead of showing white bands beside it (the jump you saw). No dissolve, no double image." },
       { k: "fixed", s: "Resizing mid-zoom finishes the zoom at once, at the new size", t: "Resize the window <em>while</em> a card is zooming open or closed. The zoom finishes immediately at the new size, open or closed, instead of the layout lurching while it catches up." },
       { k: "fixed", s: "Text in an open card can be selected; a mouse drag no longer moves the card", t: "Click and drag across the text of an open story: it should select, ready to copy. A mouse no longer drags the card around. Touch screens still can, to close or to move between stories." },
     ],
@@ -270,6 +270,10 @@ footer { max-width: 1240px; margin: 0 auto; padding: 0 16px 40px; color: var(--m
       <button type="button" data-speed="0.25" aria-pressed="false">Slow (¼)</button>
       <button type="button" data-speed="0.08" aria-pressed="false">Super slow</button>
     </div>
+    <div class="seg" role="group" aria-label="Close button timing">
+      <button type="button" data-close="after" aria-pressed="true">✕ after landing</button>
+      <button type="button" data-close="flight" aria-pressed="false">✕ with flight</button>
+    </div>
   </div>
 </div></div>
 <main>
@@ -295,10 +299,11 @@ const BUNDLES = { fixed: decode(${JSON.stringify(b64(js))}), original: decode(${
 const REDUCED_STUB = ${JSON.stringify(REDUCED_STUB)};
 const store = { get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} } };
 let speed = 1;
+let closeTiming = "after";
 let lib = "fixed";
 const stageHtml = (scenario, reduced) =>
   '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Scenario: ' + scenario + '</title></head><body><div id="app"></div><script>window.ZOOM_DEMO=' +
-  JSON.stringify({ scenario, timeScale: speed, simulatedReduced: reduced }) + ';' + (reduced ? REDUCED_STUB : '') + '<\\/script><script>' + BUNDLES[lib] + '<\\/script></body></html>';
+  JSON.stringify({ scenario, timeScale: speed, closeTiming, simulatedReduced: reduced }) + ';' + (reduced ? REDUCED_STUB : '') + '<\\/script><script>' + BUNDLES[lib] + '<\\/script></body></html>';
 const frames = [...document.querySelectorAll("iframe.stage")];
 // Stages load from blob: URLs rather than srcdoc, so browser history (the Back button) works inside them.
 const blobUrl = (f) => URL.createObjectURL(new Blob([stageHtml(f.dataset.scenario, f.hasAttribute("data-reduced"))], { type: "text/html" }));
@@ -320,7 +325,7 @@ const browser = () => {
   return name + (m ? " " + m[1].split(".")[0] : "") + (os ? " on " + os : "");
 };
 const render = () => {
-  const lines = ["Zoom demo results", "Library: " + (lib === "fixed" ? "Fixed" : "Original (as received)") + " · Browser: " + browser() + " · Reduced motion on device: " + (matchMedia("(prefers-reduced-motion: reduce)").matches ? "on" : "off"), "[x] = I saw this   [ ] = didn't see it, or didn't try", ""];
+  const lines = ["Zoom demo results", "Library: " + (lib === "fixed" ? "Fixed" : "Original (as received)") + " · ✕ timing: " + closeTiming + " · Browser: " + browser() + " · Reduced motion on device: " + (matchMedia("(prefers-reduced-motion: reduce)").matches ? "on" : "off"), "[x] = I saw this   [ ] = didn't see it, or didn't try", ""];
   document.querySelectorAll(".scenario").forEach((sec) => {
     const n = sec.dataset.n;
     lines.push(n + ". " + sec.dataset.title);
@@ -358,6 +363,12 @@ document.addEventListener("click", (e) => {
     speed = Number(t.dataset.speed);
     document.querySelectorAll("[data-speed]").forEach((b) => b.setAttribute("aria-pressed", String(b === t)));
     frames.forEach((f) => f.contentWindow && f.contentWindow.postMessage({ type: "zoom-demo-timescale", value: speed }, "*"));
+  }
+  if (t.dataset.close) {
+    closeTiming = t.dataset.close;
+    document.querySelectorAll("[data-close]").forEach((b) => b.setAttribute("aria-pressed", String(b === t)));
+    frames.forEach((f) => f.contentWindow && f.contentWindow.postMessage({ type: "zoom-demo-close-timing", value: closeTiming }, "*"));
+    render();
   }
   if (t.dataset.lib && t.dataset.lib !== lib) {
     lib = t.dataset.lib;

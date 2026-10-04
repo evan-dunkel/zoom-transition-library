@@ -119,6 +119,57 @@ test.describe("geometry", () => {
     await expect.poll(() => clean(page)).toMatchObject({ phase: "idle", clones: 0, hidden: 0, htmlOverflow: "", inert: 0 });
   });
 
+  test("the card hugs the flying image (no card showing beside it) and grows out from it", async ({ page }) => {
+    await open(page, { scenario: "grid" });
+    const trace = page.evaluate(() => new Promise<any[]>((resolve) => {
+      const out: any[] = []; const t0 = performance.now();
+      const step = (now: number) => {
+        const card = (window as any).card("grid-2") as HTMLElement | null;
+        const v = (window as any).cloneVisible(document.querySelector('.zoom-clone[data-zoom-id="grid-2"]'));
+        if (card && v && v.w !== undefined && card.style.clipPath) {
+          const r = card.getBoundingClientRect(); const k = r.width / card.offsetWidth;
+          const ins = card.style.clipPath.match(/inset\(([^r)]*)/)![1].trim().split(/\s+/).map(parseFloat);
+          const [t, rr = t, b = t, l = rr] = ins;
+          out.push({ left: r.left + l * k, right: r.right - rr * k, top: r.top + t * k, img: v });
+        }
+        if (now - t0 < 1200) requestAnimationFrame(step); else resolve(out);
+      };
+      requestAnimationFrame(step);
+    }));
+    await page.click('[data-tile="grid-2"]');
+    const frames = await trace;
+    expect(frames.length).toBeGreaterThan(5);
+    for (const f of frames) {
+      // An edge-to-edge hero: the card's visible sides are the image's sides, all the way.
+      expect(Math.abs(f.left - f.img.x)).toBeLessThan(1.5);
+      expect(Math.abs(f.right - (f.img.x + f.img.w))).toBeLessThan(1.5);
+    }
+  });
+
+  test('closeButtonTiming "flight": the close button fades in with the flight, above the image, and hands over in place', async ({ page }) => {
+    await page.setViewportSize({ width: 1400, height: 900 });
+    await open(page, { scenario: "portfolio", props: { closeButtonTiming: "flight" } });
+    const trace = page.evaluate(() => new Promise<any[]>((resolve) => {
+      const out: any[] = []; const t0 = performance.now();
+      const step = (now: number) => {
+        const c = document.querySelector<HTMLElement>(".zoom-close-copy");
+        if (c) { const r = c.getBoundingClientRect(); out.push({ o: +c.style.opacity, x: r.left, y: r.top, w: r.width }); }
+        if (now - t0 < 1500) requestAnimationFrame(step); else resolve(out);
+      };
+      requestAnimationFrame(step);
+    }));
+    await page.click('[data-tile="portfolio-1"] .pf-thumb');
+    const frames = await trace;
+    expect(frames.length).toBeGreaterThan(5);
+    expect(frames[0].o).toBeLessThan(0.2);
+    expect(frames.at(-1).o).toBeGreaterThan(0.95);
+    await expect.poll(() => phase(page)).toBe("open");
+    expect(await page.locator(".zoom-close-copy").count()).toBe(0); // the real button has taken over
+    const real = await page.evaluate(() => { const r = document.querySelector(".zoom-card:not([inert]) .zoom-close")!.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width }; });
+    expect(Math.abs(real.x - frames.at(-1).x) + Math.abs(real.y - frames.at(-1).y) + Math.abs(real.w - frames.at(-1).w)).toBeLessThan(1.5);
+    expect(await page.evaluate(() => getComputedStyle(document.querySelector(".zoom-card:not([inert]) .zoom-close-bar")!).opacity)).toBe("1");
+  });
+
   test("the close button is hidden while the hero flies and shown once it lands", async ({ page }) => {
     await open(page, { scenario: "portfolio" });
     const rec = page.evaluate(() => (window as any).record("portfolio-1", 1500));
