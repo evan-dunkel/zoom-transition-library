@@ -1,7 +1,7 @@
 import { launch, openScenario } from "./lib.mjs";
 const browser = await launch();
-for (const [label, props] of [["group of 9 (default paging)", {}], ["paging off (1 card)", { paging: false }]]) {
-  const page = await openScenario(browser, { scenario: "grid", props });
+for (const [label, props, js] of [["fixed, group of 9", {}, "app.js"], ["original, group of 9", {}, "app-original.js"]]) {
+  const page = await openScenario(browser, { url: (await import("./lib.mjs")).urlFor({ scenario: "grid", props }).replace("test.html", js === "app.js" ? "test.html" : "test-original.html") });
   const cdp = await page.context().newCDPSession(page);
   await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
   await page.evaluate(() => { window.__lt = []; new PerformanceObserver((l) => l.getEntries().forEach((e) => __lt.push(Math.round(e.duration)))).observe({ type: "longtask" }); });

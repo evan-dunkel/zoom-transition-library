@@ -2,11 +2,11 @@
   "name": "zoom-review-harness",
   "private": true,
   "type": "module",
-  "description": "Review-only tooling: builds the demo and runs browser checks against the unmodified library in ../../src/zoom",
+  "description": "Review tooling: builds the demo (fixed + original library) and runs browser checks against src/zoom",
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "build": "node build.mjs",
-    "test": "playwright test"
+    "test": "node build.mjs && playwright test"
   },
   "dependencies": {
     "motion": "13.5.0",

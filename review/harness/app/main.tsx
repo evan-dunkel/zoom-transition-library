@@ -8,7 +8,7 @@ import appCss from "./app.css";
 import { Art, Body, artDataUri, entries, type Entry } from "./content";
 
 type Config = {
-  scenario: "grid" | "scrolled" | "mobile" | "reduced" | "rapid" | "late" | "carousel" | "keyboard" | "template";
+  scenario: "portfolio" | "grid" | "scrolled" | "mobile" | "reduced" | "rapid" | "late" | "carousel" | "keyboard" | "template";
   /** Test-only: late scenario loads real image URLs from here (the test delays them) instead of a timer. */
   lateUrl?: string;
   /** Test-only: fly the hero as a still snapshot (ZoomHero live={false}). */
@@ -104,6 +104,62 @@ function LateDetail({ id }: { id: string }) {
         <SlowImage e={e} />
       </ZoomHero>
       <Body entry={e} long={false} />
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------- portfolio (matches the reference index) */
+
+const PROJECTS: [string, string][] = [
+  ["Title", "continuation as a sentence"],
+  ["Another project", "that offers concise help"],
+  ["Wayfinding", "for a hospital that nobody gets lost in"],
+  ["Type scale", "tuned for low-vision reading"],
+  ["Checkout", "that works with a switch device"],
+  ["Field guide", "to writing accessible alt text"],
+];
+function PortfolioIndex({ items }: { items: Entry[] }) {
+  const { open } = useZoom();
+  return (
+    <ul className="pf-grid">
+      {items.map((e, i) => (
+        <li key={e.id}>
+          <a
+            className="pf-item"
+            data-tile={e.id}
+            href={`#/work/${e.id}`}
+            onClick={(ev) => {
+              if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.button !== 0) return;
+              ev.preventDefault();
+              open(e.id);
+            }}
+          >
+            <ZoomSource id={e.id} group="portfolio" as="span" className="pf-thumb">
+              <Art seed={e.seed} />
+            </ZoomSource>
+            <span className="pf-caption">
+              <span className="pf-title">{PROJECTS[i][0]}</span> {PROJECTS[i][1]}
+            </span>
+          </a>
+        </li>
+      ))}
+    </ul>
+  );
+}
+function PortfolioDetail({ id }: { id: string }) {
+  const e = byId.get(id)!;
+  const i = Number(id.split("-")[1]) - 1;
+  return (
+    <div className="pf-detail">
+      <ZoomHero className="pf-hero">
+        <Art seed={e.seed} label={`Project image: ${PROJECTS[i][0]}`} />
+      </ZoomHero>
+      <div className="pf-body">
+        <h2>
+          {PROJECTS[i][0]} <span>{PROJECTS[i][1]}</span>
+        </h2>
+        <Body entry={e} />
+      </div>
     </div>
   );
 }
@@ -292,6 +348,21 @@ function App() {
   });
   const detail = (id: string) => <Detail id={id} />;
 
+  if (s === "portfolio") {
+    const items = list(s, 6);
+    return (
+      <ZoomProvider {...provider((id) => <PortfolioDetail id={id} />, { getLabel: (id) => PROJECTS[Number(id.split("-")[1]) - 1][0] })}>
+        <main className="pf-page">
+          <header className="pf-header">
+            <h1>Evan Dunkel</h1>
+            <p>Design engineer for accessibility.</p>
+          </header>
+          <PortfolioIndex items={items} />
+        </main>
+        <StatusBar />
+      </ZoomProvider>
+    );
+  }
   if (s === "grid" || s === "reduced") {
     const items = list(s, 9);
     return (

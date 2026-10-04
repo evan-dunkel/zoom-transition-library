@@ -96,3 +96,24 @@ kbd { font: 600 0.8em ui-monospace, monospace; padding: 1px 5px; border: 1px sol
 }
 .tester-buttons button:hover { border-color: var(--accent); }
 .tester-log { margin: 10px 0 0; font-size: 0.85rem; color: var(--muted) !important; }
+
+/* Portfolio scenario: modelled on the reference index (white page, two columns, 3:2 images). */
+.pf-page { --zoom-card-bg: #fff; max-width: 1310px; margin: 0 auto; padding: clamp(48px, 12vw, 200px) clamp(20px, 6vw, 80px) 120px; }
+body:has(.pf-page), html:has(.pf-page) { background: #fff; --zoom-card-bg: #fff; }
+.pf-header h1 { font-size: clamp(1.6rem, 3vw, 2.6rem); font-weight: 500; letter-spacing: -0.02em; margin: 0; }
+.pf-header p { font-size: clamp(1.6rem, 3vw, 2.6rem); font-weight: 500; letter-spacing: -0.02em; margin: 0; color: #8a8f99 !important; max-width: none; }
+.pf-grid { list-style: none; padding: 0; margin: clamp(48px, 9vw, 120px) 0 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 56px 64px; }
+@media (max-width: 720px) { .pf-grid { grid-template-columns: minmax(0, 1fr); gap: 40px; } }
+.pf-item { display: block; color: inherit; text-decoration: none; border-radius: 16px; }
+.pf-item:focus-visible { outline: 3px solid #1d4ed8; outline-offset: 6px; }
+.pf-thumb { display: block; aspect-ratio: 3 / 2; border-radius: 14px; overflow: hidden; background: #eee; }
+.pf-thumb .art, .pf-hero .art { display: block; width: 100%; height: 100%; }
+.pf-caption { display: inline-block; margin-top: 18px; font-size: 1.25rem; color: #6b7280; text-decoration: underline; text-decoration-color: #c9ccd2; text-decoration-thickness: 2px; text-underline-offset: 8px; }
+.pf-title { color: #111; }
+.pf-detail { padding: clamp(14px, 3vw, 28px); }
+.pf-hero { aspect-ratio: 3 / 2; border-radius: 14px; overflow: hidden; }
+.pf-body { padding: 24px clamp(4px, 2vw, 16px) 16px; }
+.pf-body h2 { font-size: 1.6rem; font-weight: 500; margin: 0 0 1rem; letter-spacing: -0.01em; }
+.pf-body h2 span { color: #8a8f99; }
+.pf-body .detail-body { padding: 0; }
+.pf-body .detail-title, .pf-body .detail-place { display: none; }

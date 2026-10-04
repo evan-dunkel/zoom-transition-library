@@ -6,7 +6,52 @@
 
 ---
 
-## 1. Verdict
+## 0. Round 2: fixes made, and what's left
+
+After the first review, you asked me to:
+- make reduced motion instant instead of a fade
+- support images that sit inset inside the opened card
+- stop the mouse from dragging cards, so text can be selected
+- fix the biggest issues
+
+All changes are in `src/zoom/`. The library as received is still the repo's first commit. The demo has a **Fixed / Original** switch, so you can compare the two. With the fixed library, 20 of the 22 browser tests pass. The other 2 fail as expected: they check the deep-link and template limitations below.
+
+| # | Issue | Status | What changed (file) |
+|---|---|---|---|
+| C-1 | Unloaded photo freezes the page | **Fixed** | A hero with no size yet doesn't fly: the card zooms on its own, and the photo appears in it when it arrives (`flight.ts` `canFly`, `ZoomProvider.tsx` open/close). Separately, no spring can hang any more: a spring with an invalid target lands at once, and a safety timer finishes any spring that runs far past its expected time (`springs.ts` `springTo`). |
+| I-1 | Focus escapes behind the card | **Fixed** | As a full-window overlay, the rest of the page is made `inert` automatically while open, and given back on close (`setBackgroundInert`). |
+| I-2 | Arrow keys hijacked in text fields | **Fixed** | Keys typed into inputs, textareas, selects and editable text are left alone, as are shortcuts with modifier keys. Content can stop Esc by handling it first. Esc inside a field still closes the card, as native dialogs do. |
+| I-3 | Screen readers not told anything opened | **Fixed** | The dialog is named after the visible item (`aria-label` from `getLabel`). |
+| I-4 | Resize during opening leaves the card the wrong size | **Fixed** | The layout is re-measured when the opening finishes (`openDone`). |
+| I-5 | Corner pop at take-off | **Fixed** (corners). **Not fixed** (content shift when crops differ) | Corners blend from the source's radius to the hero's, read from the element or its first child (`flight.ts`). The content shift is avoided by giving thumbnails and heroes the same crop, which your layout already does. |
+| I-6 | History failure throws visitors off the site | **Fixed** | History writes are guarded, and only entries the browser accepted are counted. |
+| I-7 | Text can't be selected | **Fixed** | Per your suggestion: **a mouse no longer drags cards**, and text selects normally. Touch keeps every gesture (tested). Mouse and trackpad users page with the wheel or arrow keys, and close by scrolling past the top, Esc, ✕ or a click outside. A text selection dragged past the card doesn't count as a click outside. |
+| I-8 | No tests, docs, working scripts | **Fixed** | `README.md`, a root `tsconfig.json`, working `typecheck` / `test` / `demo` scripts, and 22 browser tests. |
+| — | **Reduced motion** (your change) | **Changed** | Now **instant**: no movement and no fade, on open, close and paging. It also follows the device setting live, without a reload (this was M-3). An app-wide `<MotionConfig reducedMotion="always">` turns it on too. |
+| — | **Inset images** (your change) | **New** | When a card has a hero, the card now lands so its *hero* sits exactly on the thumbnail. A hero inset with a margin and its own radius grows out of the thumbnail with the card around it. An edge-to-edge hero behaves exactly as before. Measured at 0 px difference on desktop and phone. |
+| M-4 | Vanished source → card flies to the corner | **Fixed** | A source that's gone or 0×0 counts as missing, so the card fades instead. |
+| M-1, M-5, M-6, M-7, M-8, M-9 | Sticky-header pop, row jump, startup freeze on slow phones, ✕ pop-in, duplicate ids, late `scan` sources | Not fixed | Minor, or not relevant to your layout (no sticky header, no sideways rows). M-6 should be checked on a real phone. |
+| M-2 | Deep links | Not fixed in the library | Solved by the framework choice below: every project gets a real page. |
+| S-1 | Template HTML runs inline handlers | Documented | Correction to my first report: cloning the template's nodes would *not* stop this (inline handlers run whenever the markup is inserted). The component now documents that templates must hold only your own, escaped markup. |
+
+### Recommended setup for a portfolio on Cloudflare: Astro
+
+**Use [Astro](https://astro.build) with its React integration**, and build it as a static site:
+- **It's built for content sites like a portfolio.** Pages are plain HTML by default, with no JavaScript unless you ask for it. You add React only where it's needed (an Astro "island"): here, the zoom on the index page.
+- **Each project gets a real page, such as `/work/slug`.** Pass `history={{ mode: "item", url: (id) => "/work/" + id }}`. Opening a project then updates the address, Back closes it, and a shared link or reload opens that project's own page directly. That's the deep-link problem (M-2) solved without any library code.
+- **Its image component (`astro:assets`) sets each image's width and height,** so image space is always reserved. That prevents layout shift and the late-photo problem by design.
+- **The library already supports it.** The `scan` + `TemplateDestination` path was written for Astro: plain-HTML thumbnails, with the detail content written in Astro. Or render the index as a React island with `ZoomSource`/`ZoomHero`.
+- **Cloudflare supports Astro directly.** A static build needs no adapter: the build command is `astro build`, and the output folder is `dist`.
+
+**Two cautions:**
+- Don't also turn on Astro's own page-transition feature (`<ClientRouter />`) on the index, or two transition systems will compete.
+- **[Uncertain]** Cloudflare has been steering new projects from Pages towards Workers' static-asset hosting. Both serve a static Astro build the same way, but check which one Cloudflare suggests when you create the project.
+
+Alternatives I'd rank lower for this: Next.js (heavier; React everywhere; needs an extra adapter on Cloudflare) and a plain Vite + React single-page app (no real per-project pages without extra work).
+
+---
+
+## 1. Verdict (library as received)
 
 **Usable with fixes; not as-is.** The core of the library is well built:
 - Pictures leave from and land on exactly the right pixels: on scrolled pages, on phone widths and under sticky headers.
@@ -175,7 +220,7 @@ There is a second route for sites not written in React, such as static Astro sit
 - **S-1 (Minor, conditional). `TemplateDestination` turns template HTML into live HTML [Confirmed].**
   - `<template>` content is normally inert. But when a card opens, this component inserts it with `dangerouslySetInnerHTML` (`TemplateDestination.tsx:14`), and inline event handlers inside it then run. In my test, an `<img onerror=…>` in a template executed once on open.
   - If templates only ever contain your own markup, this is fine. It becomes a cross-site-scripting hole only if user-written content (comments, reviews) is placed into templates *unescaped*, on the assumption that templates are safe.
-  - **Fix:** document that template content must be trusted or escaped, or clone the template's nodes (`template.content.cloneNode(true)`) instead of using `innerHTML`.
+  - **Fix:** document that template content must be trusted or escaped. (Round 2 correction: cloning the template's nodes instead of using `innerHTML` would not help, because inline handlers run either way.)
   - Nothing else uses `innerHTML` or similar. The selector lookup correctly escapes ids (`CSS.escape`).
 
 ---
@@ -212,5 +257,5 @@ Test on a real iPhone before shipping.
 - `review/demo/zoom-demo.html`: the double-click demo. 8 labelled scenarios, slow motion, and a reduced-motion simulation plus instructions.
 - `review/review-report.md`: this report.
 - `review/evidence/*.png`: screenshots behind the findings.
-- `review/harness/`: the test app, build script, probe scripts and the Playwright suite (`tests/review.spec.ts`: 6 checks of things that work, plus 12 documented bugs marked "expected to fail"). To rerun: `cd review/harness && npm install && npm run build && npx playwright test`. Add `node build.mjs --demo` to rebuild the demo.
-- The library itself (`src/zoom/`, `package.json`) is unchanged from the zip. I left out the macOS archive leftovers (`__MACOSX/`, `.DS_Store`).
+- `review/harness/`: the test app, build script, probe scripts and the Playwright suite (`tests/review.spec.ts`). Round 2: 22 checks, 20 passing plus 2 known limitations marked "expected to fail". To rerun: `npm --prefix review/harness install`, then `npm test` from the repo root. `npm run demo` rebuilds the demo, with both library versions inside.
+- Round 1 reviewed the library exactly as received (the first commit, minus the macOS archive leftovers `__MACOSX/` and `.DS_Store`). Round 2's fixes are in `src/zoom/`; see §0.
