@@ -1,0 +1,72 @@
+/* The demo "website" inside each frame. Not part of the library. */
+:root {
+  --ink: #1c1d21;
+  --muted: #62646c;
+  --paper: #f6f3ee;
+  --line: #e2ddd4;
+  --accent: #2f5d50;
+  --zoom-card-bg: #fffdf9;
+  --zoom-card-color: var(--ink);
+}
+* { box-sizing: border-box; }
+html { background: var(--paper); color: var(--ink); }
+body { margin: 0; font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--paper); }
+h1 { font-size: 1.7rem; line-height: 1.2; margin: 0 0 0.5rem; }
+h2 { font-size: 1.2rem; margin: 2rem 0 0.8rem; }
+a { color: var(--accent); }
+
+.site-header { display: flex; align-items: center; gap: 24px; height: 60px; padding: 0 24px; background: rgba(246, 243, 238, 0.94); border-bottom: 1px solid var(--line); }
+.site-header.sticky { position: sticky; top: 0; z-index: 10; backdrop-filter: blur(8px); }
+.logo { font-weight: 700; }
+.site-header nav { display: flex; gap: 16px; font-size: 0.9rem; }
+.site-header nav a { color: var(--muted); text-decoration: none; }
+
+.page { max-width: 1040px; margin: 0 auto; padding: 28px 24px 96px; }
+.page-narrow { padding: 20px 16px 96px; }
+.lede, .filler { color: var(--muted); max-width: 64ch; }
+
+.tiles { list-style: none; margin: 0; padding: 0; }
+.tiles-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 22px; }
+.tiles-rows { display: flex; flex-direction: column; gap: 12px; }
+.featured .tiles-grid { grid-template-columns: minmax(0, 520px); }
+.tile { display: block; color: inherit; text-decoration: none; border-radius: 16px; }
+.tile:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
+.thumb { display: block; aspect-ratio: 4 / 3; border-radius: 14px; overflow: hidden; background: #ddd; }
+.thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.tile-text { display: block; padding: 10px 2px 0; }
+.tile-title { display: block; font-weight: 650; }
+.tile-place { display: block; font-size: 0.85rem; color: var(--muted); }
+
+/* Phone rows: small square thumbnail beside the text. */
+.tiles-rows .tile { display: flex; align-items: center; gap: 14px; padding: 8px; background: #fff; border: 1px solid var(--line); }
+.tiles-rows .thumb { flex: 0 0 76px; width: 76px; aspect-ratio: 1; border-radius: 10px; }
+.tiles-rows .tile-text { padding: 0; }
+
+/* Detail page inside the card. */
+.detail { padding-bottom: 40px; }
+.d-hero { aspect-ratio: 16 / 10; overflow: hidden; background: #e8e3da; }
+.d-hero img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.d-body { padding: 18px 28px 0; }
+.d-place { margin: 0; color: var(--muted); font-size: 0.9rem; }
+.d-title { margin: 0.2rem 0 1rem; font-size: 1.6rem; }
+.d-body p { max-width: 62ch; }
+.hint-inline { font-size: 0.9rem; color: var(--accent); font-weight: 600; }
+.strip { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 8px; scrollbar-width: thin; }
+.strip img { flex: 0 0 220px; width: 220px; height: 140px; object-fit: cover; border-radius: 10px; }
+.table-wrap { overflow-x: auto; margin: 16px 0; border: 1px solid var(--line); border-radius: 10px; }
+.table-wrap table { border-collapse: collapse; min-width: 1100px; font-size: 0.9rem; }
+.table-wrap th, .table-wrap td { padding: 8px 12px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+.note { display: inline-flex; gap: 8px; align-items: center; }
+.note input { font: inherit; padding: 4px 8px; }
+
+/* Rapid-click tester. */
+.tester { margin: 0 0 22px; padding: 14px; background: #fff; border: 1px solid var(--line); border-radius: 12px; }
+.tester-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.tester-buttons button { font: inherit; font-size: 0.9rem; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--paper); cursor: pointer; }
+.tester-log { margin: 10px 0 0; font-size: 0.9rem; color: var(--muted); }
+
+/* Status bar. */
+.status { position: fixed; left: 8px; bottom: 8px; right: 8px; z-index: 2000; display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 6px 10px; border-radius: 10px; background: rgba(20, 22, 28, 0.86); color: #e8e8ea; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; pointer-events: none; }
+.status .ok { color: #7ee2a8; }
+.status .bad { color: #ff8f8f; }
+.status .warn { color: #ffd479; }
