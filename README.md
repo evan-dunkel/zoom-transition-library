@@ -1,110 +1,49 @@
 # Zoom transition
 
-React components for an iOS-style zoom transition: a thumbnail on the page zooms
-up into a card, its image flying separately from where it sits on the page to
-where it sits in the card. Built on React 19 and [Motion](https://motion.dev)
-springs. It does not use the View Transitions API: the card opens as an overlay
-on the same page (optionally with its own address in the browser history).
-
-## Use
+A thumbnail zooms into a card, and its image flies to its place inside the card. Close, and it flies back. Built with React and Motion.
 
 ```tsx
 import { ZoomProvider, ZoomSource, ZoomHero, useZoom } from "./zoom";
-import "./zoom/zoom.css"; // or zoom.base.css alone, to style it all yourself (see Styling)
+import "./zoom/zoom.css";
 
-export function Work({ projects }) {
-  return (
-    <ZoomProvider
-      renderDestination={(id) => <Project id={id} />}
-      getLabel={(id) => projects.find((p) => p.id === id).title} // names the dialog for screen readers
-      history={{ mode: "item", url: (id) => `/work/${id}` }}     // optional: real addresses (see below)
-    >
-      <Grid projects={projects} />
-    </ZoomProvider>
-  );
-}
+export const Work = () => (
+  <ZoomProvider renderDestination={(id) => <Project id={id} />} getLabel={(id) => titleOf(id)}>
+    <Grid />
+  </ZoomProvider>
+);
 
-function Grid({ projects }) {
+function Grid() {
   const { open } = useZoom();
   return projects.map((p) => (
     <a key={p.id} href={`/work/${p.id}`} onClick={(e) => { e.preventDefault(); open(p.id); }}>
-      <ZoomSource id={p.id}>
-        <img src={p.thumb} width={1200} height={800} alt="" />
-      </ZoomSource>
+      <ZoomSource id={p.id}><img src={p.thumb} width={1200} height={800} alt="" /></ZoomSource>
       {p.title}
     </a>
   ));
 }
 
 function Project({ id }) {
-  return (
-    <article>
-      <ZoomHero>                                  {/* the part that flies */}
-        <img src={hero(id)} width={1200} height={800} alt="…" />
-      </ZoomHero>
-      …
-    </article>
-  );
+  return <ZoomHero><img src={heroOf(id)} width={1200} height={800} alt="…" /></ZoomHero>;
 }
 ```
 
-- **The hero can sit anywhere in the card.** It can run edge to edge or be inset with a margin, with or without rounded corners. The card lands so the hero covers its thumbnail exactly, and the corner radius blends between the thumbnail's and the hero's.
-- **Reserve image space.** Give images `width`/`height` (or CSS `aspect-ratio`). If a hero hasn't loaded and has no size, it can't fly: the card still opens, but without the shared-image effect.
-- **Crops can differ.** The thumbnail can be square and the hero wide: if the hero is a single image, its crop changes smoothly during the flight.
-- **Plain HTML (e.g. Astro):** mark thumbnails with `data-zoom-source="id"`, put detail markup in `<template data-zoom-destination="id">`, and use `scan` with `renderDestination={(id) => <TemplateDestination id={id} />}`. Template HTML becomes live markup, so it must hold only your own markup, with anything visitors wrote escaped.
+**Good to know**
+- **Reserve image sizes** with `width`/`height`. An image that hasn't loaded yet can't fly; the card still opens, without the flying image.
+- **The thumbnail and the card image can have different shapes.** The picture's crop changes smoothly in flight.
+- **Close** with Esc, the ✕, a click outside the cards, scrolling past the top, or a downward swipe on touch.
+- **Mice don't drag cards.** Dragging with a mouse selects text instead.
+- **Reduced motion** makes opening and closing instant.
+- **For real addresses**, add `history={{ mode: "item", url: (id) => "/work/" + id }}` and give each project a real page there, so links and reloads work.
 
-## Behaviour
+**Styling:** `zoom.css` is the structure plus a default look. To style it all yourself, import `zoom.base.css` alone. Or keep the look and change it with `--zoom-card-bg`, `--zoom-card-radius`, `--zoom-dim-color` and friends; your own CSS always wins.
 
-| | |
-|---|---|
-| Open / close | Click a thumbnail. Close with Esc, the ✕ button, a click on empty space outside the cards, scrolling past the card's top, or a touch drag down. The narrow gap between two cards does nothing, and clicking a neighbour that's peeking in switches to it. Tapping a card while it flies home reopens it. The ✕ fades in once the image has landed. A window resize mid-transition finishes the transition at once. |
-| The flight | The image flies from the thumbnail to its spot in the card. Each corner blends from the thumbnail's radius to the one it ends with: the card's own rounded corner, where the image meets it. If the hero is a single image (an `img`/`video` with `object-fit: cover`, or an SVG set to `slice`), the whole picture flies and its crop changes smoothly from the thumbnail's to the hero's. Thumbnail and hero should show the same picture, both centred. While the image flies, its card is clipped around it and grows out from it, so the card never shows beside the image. |
-| Close button | `closeButtonTiming="flight"` (default): fades in and out with the flight, drawn above the flying image, and hands over to the real button in place. `"after"`: hidden while the image flies, fades in over 100 ms once it lands. |
-| Group | Thumbnails in the same `group` become a pager. Use ← → or a touch swipe to move between them. `paging={false}` shows only the opened item. |
-| Mouse | A mouse never drags cards. Pressing and dragging selects text. |
-| Reduced motion | Instant: no movement, no fade. Follows the device setting live, or `<MotionConfig reducedMotion="always">`. |
-| Keyboard / screen readers | Focus moves to ✕ on open and back to the thumbnail on close (without a visible ring if the card was opened by mouse or touch, until the next key press; if your ring is a box-shadow, add it to the `[data-zoom-quiet-focus]` rule in `zoom.css`). The page behind is made `inert` while open. The dialog is named by `getLabel`. Arrow keys inside text fields are left alone. |
-| History | With `history`, opening sets the address and Back closes. Give each item a real page at that address, so reloads and shared links work. |
-
-## Styling
-
-The CSS comes in two files:
-
-| File | What it is | Needed? |
-|---|---|---|
-| `zoom.base.css` | Structure: the overlay, the card layers, scrolling, the sticky close bar, hiding sources, the flying copies and the close button's timing. Nothing about looks. | **Yes** |
-| `zoom.theme.css` | The default look: the card's background, text colour and corners, the backdrop colour, and the built-in close button (a small round button, top right). | Optional |
-
-`zoom.css` imports both, for the defaults in one line.
-
-**Headless:** import `zoom.base.css` only, then style the classes yourself:
-
-| Class | What it is |
-|---|---|
-| `.zoom-dim` | The backdrop; give it a background colour. Its opacity comes from the `dim` prop. |
-| `.zoom-card` and `.zoom-card-content` | The card. Give both the same border-radius, and give the content a background. |
-| `.zoom-close` | The built-in button. Or pass `closeButton={(close) => <YourButton />}`, or `closeButton={false}`. |
-
-Without a theme, the zoom works exactly the same, with nothing styled (a test checks this).
-
-**Keeping the theme but changing it:** every theme rule is wrapped in `:where()`, so it has no specificity. Any rule of yours on the same class wins, with no `!important` needed. For small changes, set the custom properties:
-- `--zoom-card-bg`, `--zoom-card-color`, `--zoom-card-radius`
-- `--zoom-dim-color`
-- `--zoom-close-bg`, `--zoom-close-color`, `--zoom-focus`
-
-**Elsewhere:**
-- Card spacing and maximum width come from the `geometry` prop; backdrop strength comes from `dim`.
-- Everything inside a card is yours: whatever `renderDestination` returns.
-- What you can't replace is the card's own markup, `article.zoom-card > .zoom-card-scroll > .zoom-card-content`.
-
-## Scripts
-
+**Commands**
 ```sh
 npm install && npm --prefix review/harness install
-npm run typecheck   # strict TypeScript check of src/
-npm test            # builds the test app and runs the browser checks (review/harness/tests)
-npm run demo        # rebuilds review/demo/zoom-demo.html (fixed + original library, double-click to open)
-npm run demo:serve  # serves the demo on your network, to open it on a phone
+npm test             # browser checks
+npm run demo:serve   # demo on your network (open it on a phone)
 ```
 
-The review of this library, and the fixes made, are in `review/review-report.md`.
+**More detail:**
+- Every option: `AGENTS.md`, or the comments in `src/zoom/ZoomProvider.tsx`.
+- How the library was reviewed and fixed: `review/review-report.md`.

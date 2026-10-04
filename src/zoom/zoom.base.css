@@ -2,7 +2,7 @@
  * Zoom: the structure the library needs to work. Required.
  * Positioning, layers, scrolling, hiding sources, the flying copies and the timing of
  * the close button. Nothing here is about looks: pair it with zoom.theme.css for the
- * default look, or style the classes yourself (see the README's Styling section).
+ * default look, or style the classes yourself (see "Markup contract" in AGENTS.md).
  */
 .zoom-root {
   position: absolute;

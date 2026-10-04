@@ -17,6 +17,12 @@ export type ZoomHeroProps = HTMLAttributes<HTMLDivElement> & {
  * Marks the shared element inside destination content: the part that flies
  * on its own path from the source and lands here. Without one, the card
  * still zooms from the source; it just has no separate flying element.
+ *
+ * Reserve its size (img width/height or CSS aspect-ratio): a hero with no size yet
+ * (an image still downloading) can't fly, and the card opens without it. If the hero
+ * is a single image (img/video with object-fit: cover, or an SVG with
+ * preserveAspectRatio "slice"), the whole picture flies and its crop changes smoothly
+ * from the source's to the hero's; the source should show the same picture, centred.
  */
 export function ZoomHero({ children, live = true, className, style, ...rest }: ZoomHeroProps) {
   const card = useContext(ZoomCardContext);

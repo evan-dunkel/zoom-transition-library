@@ -73,8 +73,8 @@ export type ZoomDismiss = {
   /** How much of the dim fades out as the card shrinks under the finger. */
   dimFade: number;
   /**
-   * Close by dragging (touch, or a mouse drag) down from the card's top or up from its
-   * bottom. Default: top only. Add the bottom with { bottom: true }.
+   * Close by a touch drag down from the card's top or up from its bottom (a mouse
+   * never drags; it selects text). Default: top only. Add the bottom with { bottom: true }.
    */
   drag: ZoomEdges;
   /**
@@ -136,15 +136,23 @@ export type ZoomProviderProps = {
   children?: ReactNode;
   /** The destination for a source: any React content. Mark its shared element with <ZoomHero>. */
   renderDestination: (id: string) => ReactNode;
-  /** Element the overlay is portalled into (must be positioned). Defaults to document.body, as a fixed overlay. */
+  /**
+   * Element the overlay is portalled into (must be positioned). Default: document.body,
+   * as a fixed full-window overlay; only then does the library lock page scrolling and
+   * make the rest of <body> inert while open.
+   */
   container?: () => HTMLElement | null;
-  /** Element made inert while a destination is open (the page behind). */
+  /**
+   * The page behind, made inert while a card is open. Default: every other child of
+   * <body> (full-window overlay only). Pass this to choose the element yourself, e.g.
+   * with a custom container.
+   */
   background?: () => HTMLElement | null;
   timing?: Partial<ZoomTiming>;
-  /** Playback speed for every transition; 0.2 is a handy slow motion for tuning. */
+  /** Playback speed for every transition. Default 1; 0.2 is a handy slow motion for tuning. */
   timeScale?: number;
   geometry?: Partial<ZoomGeometry> | ((size: { width: number; height: number }) => Partial<ZoomGeometry>);
-  /** Peak opacity of the backdrop dim. */
+  /** Peak opacity of the backdrop (its colour is the theme's --zoom-dim-color). Default 0.35. */
   dim?: number | (() => number);
   /**
    * Also pick up plain-HTML sources: elements with data-zoom-source="id" (and
@@ -153,7 +161,12 @@ export type ZoomProviderProps = {
    * Pass a selector to scan something other than [data-zoom-source].
    */
   scan?: boolean | string;
-  /** How cards sit on their sources. Defaults to exactly the source's width, top-aligned. */
+  /**
+   * How cards sit on their sources (where they start opening and land closing).
+   * Default: if the card has a hero, the card is placed so its hero covers the source
+   * exactly (works for edge-to-edge and inset heroes); without one, the card is as wide
+   * as the source and top-aligned. Passing landing switches to widthRatio/topOffset.
+   */
   landing?: Partial<ZoomLanding>;
   /** Drag-to-dismiss thresholds and feel. */
   dismiss?: Partial<ZoomDismiss>;
@@ -165,8 +178,8 @@ export type ZoomProviderProps = {
   /**
    * Which way the cards of a group are laid out and swiped through.
    * - "horizontal" (default): side by side; swipe sideways to page, pull down to close.
-   * - "vertical": stacked like a feed; swipe or scroll up and down to page, and drag or
-   *   scroll a card sideways (either way) to close. Up/Down arrows page. The card's own
+   * - "vertical": stacked like a feed; swipe or scroll up and down to page, and drag (touch)
+   *   or scroll a card sideways (either way) to close. Up/Down arrows page. The card's own
    *   content still scrolls first; paging takes over at its top and bottom.
    */
   orientation?: "horizontal" | "vertical";
@@ -177,8 +190,8 @@ export type ZoomProviderProps = {
    * - "stream": one continuous column, each card as tall as its content, scrolled
    *   natively like a document. No paging: the visible card is whichever sits under
    *   the top third of the screen, and that's the one that flies home on close.
-   *   Close with the close button (it stays in view), Escape, or by dragging or
-   *   scrolling sideways.
+   *   Close with the close button (it stays in view), Escape, a click outside the cards,
+   *   or by dragging (touch) or scrolling sideways.
    */
   layout?: "pager" | "stream";
   /** While open, hide every item of the group on the page (not just the visible one), so
@@ -213,8 +226,12 @@ export type ZoomProviderProps = {
   history?: false | { mode: "session" | "item"; url?: (id: string) => string };
   /** Draw tuning aids: the wheel-dismiss edge zones in each card. */
   debug?: boolean;
-  /** Accessible name for each destination card. */
+  /**
+   * Accessible name for each item: names its card and, while it's the visible one, the
+   * dialog (what a screen reader announces on open). Default: the id. Give real titles.
+   */
   getLabel?: (id: string) => string;
+  /** Accessible name of the built-in close button. Default "Close". */
   closeLabel?: string;
   /**
    * When the close button appears and disappears.

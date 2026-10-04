@@ -1,7 +1,7 @@
 /*
  * Zoom: structure and default look together. Import this for the defaults, or import
  * zoom.base.css (required) on its own and style the classes yourself; zoom.theme.css
- * is the default look. See the README's Styling section.
+ * is the default look. See README.md and AGENTS.md.
  */
 @import "./zoom.base.css";
 @import "./zoom.theme.css";
