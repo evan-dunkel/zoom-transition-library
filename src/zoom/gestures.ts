@@ -41,6 +41,8 @@ export type GestureController = {
   index(): number;
   layout(): GestureLayout;
   activeCard(): HTMLElement | null;
+  /** The index of the card under a point on screen, if any. */
+  cardAt(x: number, y: number): number | null;
   activeScroller(): HTMLElement | null;
   dismiss(): GestureDismiss;
   paging(): GesturePaging;
@@ -741,15 +743,12 @@ export function attachGestures(root: HTMLElement, c: GestureController) {
       c.close(); // a tap outside the card while it's opening sends it back
       return;
     }
-    const r = card.getBoundingClientRect();
-    if (c.layout().vertical) {
-      // Above or below: the neighbour peeking there. Beside the card: close.
-      if (e.clientY < r.top) c.page(-1);
-      else if (e.clientY > r.bottom) c.page(1);
-      else c.close();
-    } else if (e.clientX < r.left) c.page(-1);
-    else if (e.clientX > r.right) c.page(1);
-    else if (e.clientY < r.top) c.close();
+    // A neighbour peeking in: go to it. Anywhere else (the dimmed backdrop, the gaps
+    // between cards, past the last card): close. Neighbours are inert, so the click lands
+    // on what's behind them; find the card by position instead.
+    const j = c.cardAt(e.clientX, e.clientY);
+    if (j !== null && j !== c.index()) c.page(j - c.index());
+    else c.close();
   };
 
   root.addEventListener("touchstart", onTouchStart, { passive: true });

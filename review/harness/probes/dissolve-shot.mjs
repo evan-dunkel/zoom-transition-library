@@ -1,0 +1,11 @@
+import { launch, openScenario } from "./lib.mjs";
+const browser = await launch();
+const page = await openScenario(browser, { scenario: "grid", timeScale: 0.05 });
+const r = await page.evaluate(() => src("grid-2"));
+const clip = { x: r.x - 30, y: r.y - 30, width: r.w + 60, height: r.h + 60 };
+await page.screenshot({ path: "shots/dis-0-before.png", clip });
+await page.click('[data-tile="grid-2"]');
+await page.waitForTimeout(80); await page.screenshot({ path: "shots/dis-1-takeoff.png", clip });
+await page.waitForTimeout(1600); await page.screenshot({ path: "shots/dis-2-mid.png", clip: { x: 0, y: 0, width: 1200, height: 800 } });
+console.log(JSON.stringify(await page.evaluate(() => cloneVisible(document.querySelector('.zoom-clone[data-zoom-id="grid-2"]')))));
+await browser.close();

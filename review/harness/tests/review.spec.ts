@@ -54,19 +54,52 @@ test.describe("geometry", () => {
     });
   }
 
-  test("corners blend from the thumbnail's radius to the hero's, with no pop", async ({ page }) => {
-    await open(page, { scenario: "grid" });
-    const f = await flight(page, "grid-2");
-    expect(f.first.cornerRadiusPx).toBeCloseTo(14, 0); // the thumbnail's 14px
-    expect(f.last.cornerRadiusPx).toBeCloseTo(0, 0); // the hero's square corners
-  });
-
   test("an inset hero with its own radius keeps it the whole way (portfolio)", async ({ page }) => {
     await page.setViewportSize({ width: 1400, height: 900 });
     await open(page, { scenario: "portfolio" });
     const f = await flight(page, "portfolio-1");
     expect(f.first.cornerRadiusPx).toBeCloseTo(14, 0);
     expect(f.last.cornerRadiusPx).toBeCloseTo(14, 0);
+  });
+
+  test("an edge-to-edge hero takes the card's rounded corners where it meets them (no pop on landing)", async ({ page }) => {
+    await open(page, { scenario: "grid" });
+    const f = await flight(page, "grid-2");
+    expect(f.first.radii).toEqual([14, 14, 14, 14]); // the thumbnail
+    expect(f.last.radii).toEqual([28, 28, 0, 0]); // top corners clipped by the 28px card, bottom square
+  });
+
+  test("the thumbnail dissolves into the hero, and back on close (no jump when crops differ)", async ({ page }) => {
+    await open(page, { scenario: "grid" });
+    const f = await flight(page, "grid-2");
+    expect(f.first.srcOpacity).toBeCloseTo(1, 1);
+    expect(f.last.srcOpacity).toBeCloseTo(0, 1);
+    const rec = page.evaluate(() => (window as any).record("grid-2", 1400));
+    await page.keyboard.press("Escape");
+    const c = ((await rec) as any[]).filter((x) => x.clone && x.clone.w !== undefined);
+    expect(c.at(-1).clone.srcOpacity).toBeCloseTo(1, 1);
+  });
+
+  test("the close button is hidden while the hero flies and shown once it lands", async ({ page }) => {
+    await open(page, { scenario: "portfolio" });
+    const rec = page.evaluate(() => (window as any).record("portfolio-1", 1500));
+    await page.click('[data-tile="portfolio-1"] .pf-thumb');
+    const frames: any[] = await rec;
+    expect(frames.filter((x) => x.phase === "opening" && x.closeOpacity !== null).every((x) => x.closeOpacity === "0")).toBe(true);
+    expect(frames.at(-1).closeOpacity).toBe("1");
+  });
+
+  test("resizing the window while a card is opening re-aims it, with no snap once open", async ({ page }) => {
+    await open(page, { scenario: "grid" });
+    const rec = page.evaluate(() => (window as any).record("grid-1", 2000));
+    await page.click('[data-tile="grid-1"]');
+    await page.waitForTimeout(150);
+    await page.setViewportSize({ width: 600, height: 800 });
+    const frames = ((await rec) as any[]).filter((x) => x.card);
+    const k = frames.findIndex((x) => x.phase === "open");
+    const jump = (i: number) => Math.abs(frames[i].card.w - frames[i - 1].card.w) + Math.abs(frames[i].card.x - frames[i - 1].card.x);
+    for (let i = Math.max(k, 1); i < frames.length; i++) expect(jump(i)).toBeLessThan(1);
+    expect(frames.at(-1).card.x + frames.at(-1).card.w).toBeLessThanOrEqual(600);
   });
 
   test("resizing the window while a card is opening still fits the card to the window", async ({ page }) => {
@@ -90,6 +123,26 @@ test.describe("geometry", () => {
     expect(frames.filter((f) => f.clone && f.clone.x < 5 && f.clone.y < 5).length).toBe(0);
     expect(frames.filter((f) => f.card && f.card.x < 5 && f.card.y < 5).length).toBe(0);
     await expect.poll(() => clean(page)).toMatchObject({ phase: "idle", clones: 0, hidden: 0 });
+  });
+});
+
+test.describe("clicks outside the card", () => {
+  test("empty space closes; a neighbour peeking in is switched to", async ({ page }) => {
+    await page.setViewportSize({ width: 1400, height: 900 });
+    await open(page, { scenario: "portfolio" });
+    await page.click('[data-tile="portfolio-1"] .pf-thumb');
+    await expect.poll(() => phase(page)).toBe("open");
+    const r1 = await page.evaluate(() => (window as any).R((window as any).card("portfolio-1").getBoundingClientRect()));
+    await page.mouse.click(r1.x - 60, 400); // nothing to the left of the first card
+    await expect.poll(() => phase(page)).toBe("idle");
+    await page.click('[data-tile="portfolio-3"] .pf-thumb');
+    await expect.poll(() => phase(page)).toBe("open");
+    const r3 = await page.evaluate(() => (window as any).R((window as any).card("portfolio-3").getBoundingClientRect()));
+    await page.mouse.click(r3.x + r3.w + 40, 400); // the next project, peeking in
+    await expect.poll(() => page.evaluate(() => document.querySelector<HTMLElement>(".zoom-card:not([inert])")?.dataset.zoomId)).toBe("portfolio-4");
+    expect(await phase(page)).toBe("open");
+    await page.mouse.click(r3.x + 200, r3.y + r3.h + 8); // the strip below the card
+    await expect.poll(() => phase(page)).toBe("idle");
   });
 });
 
@@ -201,6 +254,25 @@ test.describe("keyboard, screen readers, text", () => {
     await page.waitForTimeout(800);
     expect(await page.evaluate(() => document.querySelector<HTMLElement>(".zoom-card:not([inert])")!.dataset.zoomId)).toBe("keyboard-2");
     expect(await page.evaluate(() => (document.activeElement as HTMLInputElement).selectionStart)).toBeGreaterThan(0);
+  });
+
+  test("after a mouse open, Esc returns focus to the thumbnail without a focus ring; after a keyboard open, with one", async ({ page }) => {
+    await open(page, { scenario: "portfolio" });
+    const ring = () => page.evaluate(() => getComputedStyle(document.activeElement!).outlineStyle);
+    await page.click('[data-tile="portfolio-1"] .pf-thumb');
+    await expect.poll(() => phase(page)).toBe("open");
+    await page.keyboard.press("Escape");
+    await expect.poll(() => phase(page)).toBe("idle");
+    expect(await page.evaluate(() => (document.activeElement as HTMLElement).dataset.tile)).toBe("portfolio-1");
+    expect(await ring()).toBe("none");
+    await page.keyboard.press("Tab"); // the next key brings rings back
+    expect(await ring()).not.toBe("none");
+    await page.keyboard.press("Shift+Tab");
+    await page.keyboard.press("Enter");
+    await expect.poll(() => phase(page)).toBe("open");
+    await page.keyboard.press("Escape");
+    await expect.poll(() => phase(page)).toBe("idle");
+    expect(await ring()).not.toBe("none");
   });
 
   test("the open card is a named dialog", async ({ page }) => {

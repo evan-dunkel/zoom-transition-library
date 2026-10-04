@@ -1,10 +1,15 @@
 import { cancelFrame, frame, motionValue, type MotionValue } from "motion/react";
 import { clamp } from "./springs";
 
-/** A box on screen. r: its corner radius on screen (px); left out, the hero's own radius is used. */
-export type Rect = { x: number; y: number; w: number; h: number; r?: number };
+/** Corner radii in px, clockwise from top-left (as in CSS): top-left, top-right, bottom-right, bottom-left. */
+export type Corners = [number, number, number, number];
 
-type Fit = { s: number; cx: number; cy: number; ix: number; iy: number; r: number };
+/** A box on screen. r: its corner radii on screen (px); left out, the hero's own radii are used. */
+export type Rect = { x: number; y: number; w: number; h: number; r?: number | Corners };
+
+type Fit = { s: number; cx: number; cy: number; ix: number; iy: number; r: Corners };
+
+const corners = (r: number | Corners): Corners => (typeof r === "number" ? [r, r, r, r] : r);
 
 export type Flight = {
   cx: MotionValue<number>;
@@ -26,7 +31,8 @@ export type Flight = {
 export type HeroMetrics = {
   W0: number;
   H0: number;
-  radius: number;
+  /** The hero's own corner radii (its first child's, if it has none). */
+  radius: Corners;
   /** The hero's own box-shadow ("none" if it has none) and corner radius, for the flight's shadow layer. */
   shadow: string;
   shadowRadius: string;
@@ -38,7 +44,7 @@ const OUTSIDE = 10000;
 /** Read everything a flight needs from the hero, in one go, before anything is written. */
 export function measureHero(hero: HTMLElement): HeroMetrics {
   const cs = getComputedStyle(hero);
-  return { W0: hero.offsetWidth, H0: hero.offsetHeight, radius: readRadius(hero), shadow: cs.boxShadow, shadowRadius: cs.borderRadius };
+  return { W0: hero.offsetWidth, H0: hero.offsetHeight, radius: readCorners(hero), shadow: cs.boxShadow, shadowRadius: cs.borderRadius };
 }
 
 /**
@@ -71,6 +77,32 @@ export function snapshotOf(hero: HTMLElement, live: boolean) {
 }
 
 /**
+ * A still copy of a source (the thumbnail on the page), styles frozen on, for the
+ * flight to dissolve from or into. Not cached: a source can look different each time
+ * (hover styles, a newly loaded image).
+ */
+export function sourceSnapshot(source: HTMLElement) {
+  const node = source.cloneNode(true) as HTMLElement;
+  // Only what a thumbnail's look depends on: copying every computed property (as for
+  // static heroes) cost a noticeable stall at the start of each open on slower phones.
+  freezeStyles(source, node, SOURCE_PROPS, 40);
+  for (const a of ["data-zoom-hidden", "data-zoom-dimmed", "data-zoom-source", "data-zoom-react-source", "id"]) node.removeAttribute(a);
+  node.querySelectorAll("[id]").forEach((n) => n.removeAttribute("id"));
+  node.style.visibility = "visible";
+  node.style.opacity = "1";
+  node.style.margin = "0";
+  node.style.position = "absolute";
+  node.style.left = "0";
+  node.style.top = "0";
+  node.style.transformOrigin = "0 0";
+  node.style.pointerEvents = "none";
+  return { node, w: source.offsetWidth, h: source.offsetHeight };
+}
+
+/** How far into the flight (from the source's end) the source has fully dissolved into the hero. */
+const DISSOLVE = 0.5;
+
+/**
  * Flies a copy of the destination's hero from one rect to another. The copy is
  * scaled uniformly to *cover* each rect and cropped to it, so a square thumbnail
  * can grow into a wide hero (or any other aspect change) without stretching.
@@ -96,6 +128,13 @@ export function createFlight(
      * pops on at take-off and off at landing; this fades it with the flight instead.
      */
     shadowOpacity?: () => number;
+    /**
+     * The source end of the flight: a copy of the thumbnail (sourceSnapshot) and its
+     * box. Near that end the copy is shown over the hero, dissolving into it over the
+     * first part of the flight, so a thumbnail cropped differently from the hero (or a
+     * different image altogether) doesn't jump at take-off or landing.
+     */
+    source?: { node: HTMLElement; w: number; h: number; rect: Rect };
   } = {},
 ): Flight {
   const { W0, H0, radius, shadow, shadowRadius } = opts.metrics ?? measureHero(hero);
@@ -107,8 +146,8 @@ export function createFlight(
       cy: r.y + r.h / 2,
       ix: Math.max(0, (W0 - r.w / s) / 2),
       iy: Math.max(0, (H0 - r.h / s) / 2),
-      // On screen, so the corners can blend from the source's radius to the hero's.
-      r: r.r ?? radius * s,
+      // On screen, so the corners can blend from the source's radii to the hero's.
+      r: r.r !== undefined ? corners(r.r) : (radius.map((v) => v * s) as Corners),
     };
   };
   let A = fit(from);
@@ -145,6 +184,12 @@ export function createFlight(
     liveHost.style.cssText = `position:absolute;left:0;top:0;width:100%;height:100%;margin:0;${shade ? "box-shadow:none;" : ""}`;
     el.appendChild(liveHost);
   }
+  // The thumbnail's own look, over everything, dissolving as the flight leaves it.
+  const src = opts.source;
+  const sSrc = src ? fit(src.rect).s : 1;
+  // A source the same size as the hero has nothing to dissolve over; skip it.
+  const dissolves = !!src && src.w >= 1 && src.h >= 1 && Math.abs(1 - sSrc) > 0.02;
+  if (src && dissolves) el.appendChild(src.node);
   layer.appendChild(el);
 
   const cx = motionValue(A.cx);
@@ -153,14 +198,25 @@ export function createFlight(
 
   const crop = (sv: number) => {
     const t = A.s === B.s ? 1 : clamp((sv - A.s) / (B.s - A.s), 0, 1);
-    return { ix: A.ix + (B.ix - A.ix) * t, iy: A.iy + (B.iy - A.iy) * t, r: A.r + (B.r - A.r) * t };
+    return { ix: A.ix + (B.ix - A.ix) * t, iy: A.iy + (B.iy - A.iy) * t, r: A.r.map((a, i) => a + (B.r[i] - a) * t) as Corners };
   };
   const write = () => {
     scheduled = false;
     const sv = s.get();
     const { ix, iy, r } = crop(sv);
-    // The corner radius in the copy's own (unscaled) units.
-    const round = r > 0.25 && sv > 0 ? r / sv : 0;
+    // The corner radii in the copy's own (unscaled) units.
+    const radii = r.map((v) => (v > 0.25 && sv > 0 ? v / sv : 0));
+    const round = Math.max(...radii);
+    if (src && dissolves) {
+      // Cover the visible (cropped) box with the thumbnail copy, and fade it out over the
+      // first DISSOLVE of the way from the source's scale to the hero's own (1).
+      const vw = W0 - 2 * ix;
+      const vh = H0 - 2 * iy;
+      const k = Math.max(vw / src.w, vh / src.h);
+      src.node.style.transform = `translate(${ix + (vw - src.w * k) / 2}px, ${iy + (vh - src.h * k) / 2}px) scale(${k})`;
+      const u = clamp((sv - sSrc) / (1 - sSrc) / DISSOLVE, 0, 1);
+      src.node.style.opacity = String(1 - u * u * (3 - 2 * u));
+    }
     const o = opts.offset ? opts.offset() : { x: 0, y: 0 };
     const left = cx.get() + o.x - (W0 * sv) / 2;
     const top = cy.get() + o.y - (H0 * sv) / 2;
@@ -183,7 +239,7 @@ export function createFlight(
     const ixs = cropX ? ix : -OUTSIDE;
     el.style.clipPath =
       cropX || it > -OUTSIDE || ib > -OUTSIDE
-        ? `inset(${it}px ${ixs}px ${ib}px ${ixs}px${round > 0 ? ` round ${round}px` : ""})`
+        ? `inset(${it}px ${ixs}px ${ib}px ${ixs}px${round > 0 ? ` round ${radii.map((v) => `${v}px`).join(" ")}` : ""})`
         : "";
   };
   // Three values change each frame; write the style once, in Motion's render step.
@@ -222,31 +278,48 @@ export function createFlight(
   return flight;
 }
 
-/** An element's top-left corner radius in px: its own, or (if it has none) its first child's, e.g. a rounded <img>. */
-export function readRadius(el: HTMLElement) {
-  const own = radiusOf(el);
-  if (own > 0) return own;
+/** An element's corner radii in px: its own, or (if it has none) its first child's, e.g. a rounded <img>. */
+export function readCorners(el: HTMLElement): Corners {
+  const own = cornersOf(el);
+  if (own.some((v) => v > 0)) return own;
   const child = el.firstElementChild as HTMLElement | null;
-  return child ? radiusOf(child) : 0;
+  return child ? cornersOf(child) : own;
 }
-function radiusOf(el: HTMLElement) {
-  const value = getComputedStyle(el).borderTopLeftRadius.split(" ")[0];
-  if (value.endsWith("%")) return (parseFloat(value) / 100) * Math.min(el.offsetWidth, el.offsetHeight);
-  return parseFloat(value) || 0;
+function cornersOf(el: HTMLElement): Corners {
+  const cs = getComputedStyle(el);
+  const px = (value: string) => {
+    const v = value.split(" ")[0];
+    return v.endsWith("%") ? (parseFloat(v) / 100) * Math.min(el.offsetWidth, el.offsetHeight) : parseFloat(v) || 0;
+  };
+  return [px(cs.borderTopLeftRadius), px(cs.borderTopRightRadius), px(cs.borderBottomRightRadius), px(cs.borderBottomLeftRadius)];
 }
 
+/** The properties a thumbnail's appearance comes from (SVG shapes keep their own attributes). */
+const SOURCE_PROPS = [
+  "display", "box-sizing", "width", "height", "padding", "border", "border-radius", "overflow",
+  "background-color", "background-image", "background-size", "background-position", "background-repeat",
+  "color", "font", "line-height", "letter-spacing", "text-align", "white-space",
+  "object-fit", "object-position", "opacity", "filter", "box-shadow", "transform", "transform-origin",
+  "position", "top", "left", "right", "bottom", "margin", "flex", "align-items", "justify-content", "gap",
+  "grid-template-columns", "grid-template-rows", "aspect-ratio", "fill", "stroke", "mix-blend-mode",
+];
+
 const MAX_FROZEN = 300;
-function freezeStyles(source: Element, target: Element) {
+function freezeStyles(source: Element, target: Element, props?: string[], max = MAX_FROZEN) {
   const from = [source, ...source.querySelectorAll("*")];
   const to = [target, ...target.querySelectorAll("*")];
-  const n = Math.min(from.length, to.length, MAX_FROZEN);
+  const n = Math.min(from.length, to.length, max);
   for (let i = 0; i < n; i++) {
     const cs = getComputedStyle(from[i]);
     let text = "";
-    for (let j = 0; j < cs.length; j++) {
-      const prop = cs[j];
-      if (prop === "visibility" || prop.startsWith("transition") || prop.startsWith("animation")) continue;
-      text += `${prop}:${cs.getPropertyValue(prop)};`;
+    if (props) {
+      for (const prop of props) text += `${prop}:${cs.getPropertyValue(prop)};`;
+    } else {
+      for (let j = 0; j < cs.length; j++) {
+        const prop = cs[j];
+        if (prop === "visibility" || prop.startsWith("transition") || prop.startsWith("animation")) continue;
+        text += `${prop}:${cs.getPropertyValue(prop)};`;
+      }
     }
     (to[i] as HTMLElement).style.cssText = text;
   }

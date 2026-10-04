@@ -85,6 +85,15 @@
 }
 .zoom-close::before { content: ""; position: absolute; inset: -7px; } /* 44px hit area */
 .zoom-close:focus-visible { outline: 2px solid var(--zoom-focus, currentColor); outline-offset: 2px; }
+/* The close button is hidden while a hero flies (it would sit under the flying image and
+   then pop over it), and fades in once the card has landed. */
+.zoom-root[data-phase="opening"] .zoom-close-bar,
+.zoom-root[data-phase="closing"] .zoom-close-bar { opacity: 0; }
+.zoom-root[data-phase="open"] .zoom-close-bar { transition: opacity 180ms ease-out; }
+@media (prefers-reduced-motion: reduce) { .zoom-root .zoom-close-bar { transition: none; } }
+/* Focus returned after a card opened by mouse or touch: no ring until a key is pressed.
+   If your focus ring isn't an outline (e.g. a box-shadow), add it to this rule too. */
+[data-zoom-quiet-focus]:focus-visible { outline: none !important; }
 
 .zoom-flight { position: absolute; inset: 0; pointer-events: none; }
 .zoom-clone { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }

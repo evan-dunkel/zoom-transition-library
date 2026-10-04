@@ -57,11 +57,12 @@ function Project({ id }) {
 
 | | |
 |---|---|
-| Open / close | Click a thumbnail. Close with Esc, the ✕ button, a click outside the card, scrolling past the card's top, or a touch drag down. Tapping a card while it flies home reopens it. |
+| Open / close | Click a thumbnail. Close with Esc, the ✕ button, a click anywhere outside the cards, scrolling past the card's top, or a touch drag down. Clicking a neighbour that's peeking in switches to it. Tapping a card while it flies home reopens it. The ✕ fades in once the image has landed. |
+| The flight | The image flies from the thumbnail to its spot in the card. Each corner blends from the thumbnail's radius to the one it ends with: the card's own rounded corner, where the image meets it. A copy of the thumbnail dissolves into the image over the first half of the zoom, so different crops don't jump. |
 | Group | Thumbnails in the same `group` become a pager. Use ← → or a touch swipe to move between them. `paging={false}` shows only the opened item. |
 | Mouse | A mouse never drags cards. Pressing and dragging selects text. |
 | Reduced motion | Instant: no movement, no fade. Follows the device setting live, or `<MotionConfig reducedMotion="always">`. |
-| Keyboard / screen readers | Focus moves to ✕ on open and back to the thumbnail on close. The page behind is made `inert` while open. The dialog is named by `getLabel`. Arrow keys inside text fields are left alone. |
+| Keyboard / screen readers | Focus moves to ✕ on open and back to the thumbnail on close (without a visible ring if the card was opened by mouse or touch, until the next key press; if your ring is a box-shadow, add it to the `[data-zoom-quiet-focus]` rule in `zoom.css`). The page behind is made `inert` while open. The dialog is named by `getLabel`. Arrow keys inside text fields are left alone. |
 | History | With `history`, opening sets the address and Back closes. Give each item a real page at that address, so reloads and shared links work. |
 
 ## Scripts
@@ -71,6 +72,7 @@ npm install && npm --prefix review/harness install
 npm run typecheck   # strict TypeScript check of src/
 npm test            # builds the test app and runs the browser checks (review/harness/tests)
 npm run demo        # rebuilds review/demo/zoom-demo.html (fixed + original library, double-click to open)
+npm run demo:serve  # serves the demo on your network, to open it on a phone
 ```
 
 The review of this library, and the fixes made, are in `review/review-report.md`.

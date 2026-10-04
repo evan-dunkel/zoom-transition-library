@@ -5,7 +5,8 @@
   "scripts": {
     "typecheck": "tsc -p .",
     "test": "npm --prefix review/harness test",
-    "demo": "npm --prefix review/harness run build -- --demo"
+    "demo": "npm --prefix review/harness run build -- --demo",
+    "demo:serve": "node review/harness/serve.mjs"
   },
   "dependencies": {
     "motion": "^13.5.0",

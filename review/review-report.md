@@ -23,7 +23,7 @@ All changes are in `src/zoom/`. The library as received is still the repo's firs
 | I-2 | Arrow keys hijacked in text fields | **Fixed** | Keys typed into inputs, textareas, selects and editable text are left alone, as are shortcuts with modifier keys. Content can stop Esc by handling it first. Esc inside a field still closes the card, as native dialogs do. |
 | I-3 | Screen readers not told anything opened | **Fixed** | The dialog is named after the visible item (`aria-label` from `getLabel`). |
 | I-4 | Resize during opening leaves the card the wrong size | **Fixed** | The layout is re-measured when the opening finishes (`openDone`). |
-| I-5 | Corner pop at take-off | **Fixed** (corners). **Not fixed** (content shift when crops differ) | Corners blend from the source's radius to the hero's, read from the element or its first child (`flight.ts`). The content shift is avoided by giving thumbnails and heroes the same crop, which your layout already does. |
+| I-5 | Corner pop at take-off | **Fixed** (round 3: per corner, and the content shift too) | Corners blend from the source's radii to the hero's, read from the element or its first child (`flight.ts`). Round 3 added per-corner handling and the thumbnail dissolve; see below. |
 | I-6 | History failure throws visitors off the site | **Fixed** | History writes are guarded, and only entries the browser accepted are counted. |
 | I-7 | Text can't be selected | **Fixed** | Per your suggestion: **a mouse no longer drags cards**, and text selects normally. Touch keeps every gesture (tested). Mouse and trackpad users page with the wheel or arrow keys, and close by scrolling past the top, Esc, ✕ or a click outside. A text selection dragged past the card doesn't count as a click outside. |
 | I-8 | No tests, docs, working scripts | **Fixed** | `README.md`, a root `tsconfig.json`, working `typecheck` / `test` / `demo` scripts, and 22 browser tests. |
@@ -33,6 +33,20 @@ All changes are in `src/zoom/`. The library as received is still the repo's firs
 | M-1, M-5, M-6, M-7, M-8, M-9 | Sticky-header pop, row jump, startup freeze on slow phones, ✕ pop-in, duplicate ids, late `scan` sources | Not fixed | Minor, or not relevant to your layout (no sticky header, no sideways rows). M-6 should be checked on a real phone. |
 | M-2 | Deep links | Not fixed in the library | Solved by the framework choice below: every project gets a real page. |
 | S-1 | Template HTML runs inline handlers | Documented | Correction to my first report: cloning the template's nodes would *not* stop this (inline handlers run whenever the markup is inserted). The component now documents that templates must hold only your own, escaped markup. |
+
+### Round 3: from your demo results (Chrome 154, macOS)
+
+| Your note | What changed |
+|---|---|
+| Esc after a mouse open shows a focus ring | **Fixed.** Focus still returns to the thumbnail, which keyboard and screen-reader users need. If the card was opened with a mouse or finger, no ring shows until the next key press (`data-zoom-quiet-focus`, plus `focusVisible: false` where browsers support it). Opened with the keyboard, the ring shows as before. If your site's focus ring is a `box-shadow` rather than an outline, add it to the `[data-zoom-quiet-focus]:focus-visible` rule in `zoom.css`. |
+| Click empty overlay space to close | **Fixed.** Any click outside the cards closes. Before, the space beside the card paged instead, even with no neighbour there. Clicking a neighbour that's peeking in still switches to it. |
+| ✕ covered by the image in flight, then pops over it | **Fixed.** The button is hidden while a hero flies and fades in (180 ms) once it lands. With reduced motion, it's simply there. |
+| Corners pop in the card grid (sharp, then rounded) | **Fixed.** You were right: round 2 only blended to the hero's *own* radius. An edge-to-edge hero is rounded by the *card's* corners. Corners are now handled one by one: where the hero meets a corner of the card, it blends to the card's radius (28 px at the top in the demo), elsewhere to its own (square). The same happens in reverse on close. |
+| Images jump on close when crops differ (scenarios 2 and 6) | **Fixed.** The flight now carries a copy of the thumbnail on top of the hero. The copy dissolves into the hero over the first half of the zoom, and back again over the last half of a close. Different crops, or even different images, no longer jump. With matching crops, as in your layout, the dissolve is invisible. Trade-off: with very different crops, both pictures show faintly at once for a moment mid-dissolve. The dissolve length is one constant (`DISSOLVE` in `flight.ts`, currently half the zoom). Copying the thumbnail adds about 8 ms at the start of each open on a desktop (about 30 ms with the CPU slowed 4×). |
+| Resize during opening snaps when it finishes ("expected?") | It was expected with the round 2 fix. It's now **re-aimed immediately**: the card adjusts at the moment of the resize, then settles into the new size with no snap at the end. |
+| Stages don't load on mobile | Opening a downloaded HTML file on a phone usually shows it without running its scripts, so the stages can't load. **Fix:** run `npm run demo:serve` and open the printed address on your phone (same Wi-Fi). Checked on an emulated phone; not on a real iPhone **[Uncertain]**. |
+
+All 27 browser tests pass: 25 behaviour checks, plus the 2 known limitations, which fail as expected.
 
 ### Recommended setup for a portfolio on Cloudflare: Astro
 

@@ -31,16 +31,23 @@ window.cloneVisible = (el = document.querySelector('.zoom-clone')) => {
   const [l, t, s] = m.slice(1).map(Number);
   const W0 = parseFloat(el.style.width), H0 = parseFloat(el.style.height);
   let it = 0, ir = 0, ib = 0, il = 0, round = 0;
-  const cp = el.style.clipPath.match(/inset\\(([^)]*?)(?: round ([-\\d.e]+)px)?\\)/);
+  const cp = el.style.clipPath.match(/inset\\(([^)]*?)(?: round ([^)]*))?\\)/);
+  let radii = [0, 0, 0, 0];
   if (cp) {
     const v = cp[1].trim().split(/\\s+/).map(parseFloat);
     const [a, b = a, c = a, d = b] = v;
     [it, ir, ib, il] = [a, b, c, d].map((x) => Math.max(0, x));
-    round = cp[2] ? +cp[2] * s : 0;
+    if (cp[2]) {
+      const r = cp[2].trim().split(/\\s+/).map(parseFloat);
+      const [ra, rb = ra, rc = ra, rd = rb] = r;
+      radii = [ra, rb, rc, rd].map((x) => +(x * s).toFixed(1));
+    }
+    round = radii[0];
   }
+  const srcLayer = el.lastElementChild && el.lastElementChild.style.opacity !== "" && el.childElementCount > 1 && !el.lastElementChild.classList.contains("zoom-live") ? +el.lastElementChild.style.opacity : null;
   const root = el.parentElement.getBoundingClientRect();
   const f = (v) => +v.toFixed(1);
-  return { x: f(root.left + l + il * s), y: f(root.top + t + it * s), w: f((W0 - il - ir) * s), h: f((H0 - it - ib) * s), s, W0, H0, cornerRadiusPx: round, clipPath: el.style.clipPath };
+  return { x: f(root.left + l + il * s), y: f(root.top + t + it * s), w: f((W0 - il - ir) * s), h: f((H0 - it - ib) * s), s, W0, H0, cornerRadiusPx: round, radii, srcOpacity: srcLayer, clipPath: el.style.clipPath };
 };
 window.src = (id) => R(document.querySelector('[data-zoom-react-source="' + id + '"],[data-zoom-source="' + id + '"]').getBoundingClientRect());
 window.card = (id) => document.querySelector('.zoom-card[data-zoom-id="' + id + '"]');
@@ -51,7 +58,7 @@ window.record = (id, ms = 3000) => new Promise((resolve) => {
   const step = (now) => {
     const c = card(id);
     const hero = c?.querySelector('[data-zoom-hero]');
-    frames.push({ t: +(now - t0).toFixed(1), phase: phase(), clone: cloneVisible(document.querySelector('.zoom-clone[data-zoom-id="' + id + '"]')), card: c && R(c.getBoundingClientRect()), cardOpacity: c && getComputedStyle(c).opacity, zoomerOpacity: getComputedStyle(document.querySelector('.zoom-zoomer')).opacity, hero: hero && R(hero.getBoundingClientRect()), heroVis: hero && getComputedStyle(hero).visibility });
+    frames.push({ t: +(now - t0).toFixed(1), phase: phase(), closeOpacity: c && getComputedStyle(c.querySelector('.zoom-close-bar')).opacity, clone: cloneVisible(document.querySelector('.zoom-clone[data-zoom-id="' + id + '"]')), card: c && R(c.getBoundingClientRect()), cardOpacity: c && getComputedStyle(c).opacity, zoomerOpacity: getComputedStyle(document.querySelector('.zoom-zoomer')).opacity, hero: hero && R(hero.getBoundingClientRect()), heroVis: hero && getComputedStyle(hero).visibility });
     if (now - t0 < ms) requestAnimationFrame(step); else resolve(frames);
   };
   requestAnimationFrame(step);

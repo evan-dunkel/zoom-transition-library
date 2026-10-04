@@ -15,7 +15,19 @@ import {
 import { createPortal } from "react-dom";
 import { MotionConfigContext, motion, motionValue, useMotionValue, type MotionValue } from "motion/react";
 import { REST, clamp, defaultTiming, springTo, type ZoomTiming } from "./springs";
-import { canFly, createFlight, measureHero, prepareSnapshot, readRadius, snapshotOf, type Flight, type HeroMetrics, type Rect } from "./flight";
+import {
+  canFly,
+  createFlight,
+  measureHero,
+  prepareSnapshot,
+  readCorners,
+  snapshotOf,
+  sourceSnapshot,
+  type Corners,
+  type Flight,
+  type HeroMetrics,
+  type Rect,
+} from "./flight";
 import { attachGestures, type DismissEdges, type GestureDismiss, type GesturePaging, type ZoomVelocity } from "./gestures";
 
 /* ------------------------------------------------------------------ types */
@@ -625,6 +637,11 @@ export function ZoomProvider(props: ZoomProviderProps) {
     flyVisible: false,
     /** Page elements this provider made inert while open (to give back on close). */
     inerted: [] as HTMLElement[],
+    /** The last kind of input on the page, and whether this session was opened by pointer. */
+    input: "keyboard" as "keyboard" | "pointer",
+    pointerOpened: false,
+    /** The window was resized mid-transition: once the new layout has rendered, re-aim at it. */
+    reaim: null as "open" | "sources" | null,
   }).current;
 
   // The shared zoom: the whole pager (card, metadata, neighbours) scales together.
@@ -871,7 +888,7 @@ export function ZoomProvider(props: ZoomProviderProps) {
     if (!el || !el.isConnected) return null;
     const r = el.getBoundingClientRect();
     if (r.width < 1 || r.height < 1) return null;
-    return { ...rel(r, root), r: readRadius(el) };
+    return { ...rel(r, root), r: readCorners(el) };
   };
 
   const heroFor = (id: string) =>
@@ -918,10 +935,35 @@ export function ZoomProvider(props: ZoomProviderProps) {
 
   const isLive = (id: string) => !!heroContent.current.get(id)?.live;
   /** Everything a flight needs from the DOM, read before anything is written. */
-  const prepareFlight = (id: string, hero: HTMLElement) => ({
+  const prepareFlight = (id: string, hero: HTMLElement, source?: HTMLElement | null) => ({
     metrics: measureHero(hero),
     snapshot: snapshotOf(hero, isLive(id)),
+    /** A copy of the thumbnail, for the flight to dissolve from (opening) or into (closing). */
+    source: source ? sourceSnapshot(source) : null,
   });
+  /**
+   * The hero's corner radii as seen in its card, at the card's full size. Where the hero
+   * reaches a corner of the card (an edge-to-edge image at the top), the card's rounded
+   * corner clips it, so that corner shows the card's radius rather than the hero's own.
+   */
+  const heroCorners = (id: string, off: { x: number; y: number; w: number; h: number }, own: Corners): Corners => {
+    const card = cardEls.current.get(id);
+    if (!card) return own;
+    const c = readCorners(card);
+    const cw = card.offsetWidth;
+    const ch = card.offsetHeight;
+    const top = Math.abs(off.y) <= 1;
+    const left = Math.abs(off.x) <= 1;
+    const right = Math.abs(off.x + off.w - cw) <= 1;
+    const bottom = Math.abs(off.y + off.h - ch) <= 1;
+    return [
+      top && left ? Math.max(own[0], c[0]) : own[0],
+      top && right ? Math.max(own[1], c[1]) : own[1],
+      bottom && right ? Math.max(own[2], c[2]) : own[2],
+      bottom && left ? Math.max(own[3], c[3]) : own[3],
+    ];
+  };
+  const scaleCorners = (r: Corners, k: number) => r.map((v) => v * k) as Corners;
 
   const liveKey = useRef(0);
   /** The card's scroller, for following content scrolled while the hero is in flight. */
@@ -935,6 +977,8 @@ export function ZoomProvider(props: ZoomProviderProps) {
     pre: ReturnType<typeof prepareFlight>,
     /** Heading into the card: the track position its landing spot was worked out for. */
     toCardTrack: number | null = null,
+    /** The thumbnail's box, for the dissolve between it and the hero (with pre.source). */
+    sourceRect: Rect | null = null,
   ) {
     const content = heroContent.current.get(it.id);
     const live = !!content?.live;
@@ -947,6 +991,7 @@ export function ZoomProvider(props: ZoomProviderProps) {
       live: live ? { className: content!.className } : undefined,
       metrics: pre.metrics,
       snapshot: pre.snapshot,
+      source: pre.source && sourceRect ? { ...pre.source, rect: sourceRect } : undefined,
       // Heading into the card: if its content is scrolled mid-flight, the hero's
       // landing spot moves with it, so the flight follows 1:1 (at the card's
       // current scale) and lands exactly where the hero is. No pop at the end.
@@ -1232,6 +1277,7 @@ export function ZoomProvider(props: ZoomProviderProps) {
     S.groupOpacity = latest.current.groupOpacity ?? null;
     S.flyVisible = latest.current.flyHome === "visible";
     S.pendingOpen = id;
+    S.pointerOpened = S.input === "pointer";
     S.origin = entry.el;
     S.mode = "zoom";
     setPhase("opening");
@@ -1291,18 +1337,18 @@ export function ZoomProvider(props: ZoomProviderProps) {
     // Measure at full size first, before the zoom is applied (and before any writes).
     const card = cardEls.current.get(id)!;
     const heroEl = heroFor(id);
-    const pre = heroEl ? prepareFlight(id, heroEl) : null;
+    const pre = heroEl ? prepareFlight(id, heroEl, S.origin) : null;
     // A hero with no size yet (an image still downloading, its space not reserved) can't
     // fly; the card zooms on its own and the image appears in it when it arrives.
     const hero = pre && canFly(pre.metrics) ? heroEl : null;
-    const src: Rect = { ...rel(S.origin!.getBoundingClientRect()), r: readRadius(S.origin!) };
+    const src: Rect = { ...rel(S.origin!.getBoundingClientRect()), r: readCorners(S.origin!) };
     let heroTarget: Rect | null = null;
     let heroInCard: { x: number; y: number; w: number; h: number } | null = null;
     if (hero) {
       const hr = hero.getBoundingClientRect();
       const cr = card.getBoundingClientRect();
       heroInCard = { x: hr.left - cr.left, y: hr.top - cr.top, w: hr.width, h: hr.height };
-      heroTarget = { x: at.x + heroInCard.x, y: at.y + heroInCard.y, w: hr.width, h: hr.height, r: pre!.metrics.radius };
+      heroTarget = { x: at.x + heroInCard.x, y: at.y + heroInCard.y, w: hr.width, h: hr.height, r: heroCorners(id, heroInCard, pre!.metrics.radius) };
     }
 
     const z = zoomOnto(src, at.x, at.y, heroInCard);
@@ -1328,7 +1374,7 @@ export function ZoomProvider(props: ZoomProviderProps) {
     it.sLand = z.s;
     if (hero && heroTarget && pre) {
       it.srcFit = fitOf(pre.metrics, src);
-      const f = startFlight(it, hero, src, heroTarget, pre, trackAt(S.index));
+      const f = startFlight(it, hero, src, heroTarget, pre, trackAt(S.index), src);
       anims.push(
         springTo(f.cx, f.to.cx, T.open, { speed: sp }),
         springTo(f.cy, f.to.cy, T.open, { speed: sp }),
@@ -1534,15 +1580,22 @@ export function ZoomProvider(props: ZoomProviderProps) {
         const src = sources.current.get(id);
         const metrics = hero ? measureHero(hero) : null;
         const flies = !!metrics && canFly(metrics);
+        const offset = heroOffset(id);
+        const heroRect = hero ? rel(hero.getBoundingClientRect(), rootBox) : null;
+        // null when the source is gone or hidden: the card then fades instead of flying.
+        const dest = sourceBox(src?.el, rootBox);
+        // The hero's corners as they look right now (the card may be shrunk by a drag).
+        const own = flies && offset ? heroCorners(id, offset, metrics!.radius) : null;
         return [
           id,
           {
-            offset: heroOffset(id),
-            heroRect: hero ? rel(hero.getBoundingClientRect(), rootBox) : null,
-            // null when the source is gone or hidden: the card then fades instead of flying.
-            dest: sourceBox(src?.el, rootBox),
+            offset,
+            heroRect: heroRect && own && offset ? { ...heroRect, r: scaleCorners(own, heroRect.w / offset.w) } : heroRect,
+            /** The hero's corners in the fully open card. */
+            openCorners: own,
+            dest,
             // Only cards without a flight in the air will need a new one.
-            pre: flies && !it.flight ? prepareFlight(id, hero!) : null,
+            pre: flies && !it.flight ? prepareFlight(id, hero!, dest ? src!.el : null) : null,
             metrics: flies ? metrics : null,
           },
         ];
@@ -1629,7 +1682,7 @@ export function ZoomProvider(props: ZoomProviderProps) {
       if (hero && off && m.metrics) {
         const rest = slot(it.j, trackAt(index));
         const heroTarget: Rect =
-          target === "sources" ? dest : { x: rest.x + off.x, y: rest.y + off.y, w: off.w, h: off.h, r: m.metrics.radius };
+          target === "sources" ? dest : { x: rest.x + off.x, y: rest.y + off.y, w: off.w, h: off.h, r: m.openCorners ?? m.metrics.radius };
         if (it.flight) {
           // Already flying: turn it around, keeping its current speed. If it was
           // following the card's scrolling, fold that offset into its position first
@@ -1657,7 +1710,7 @@ export function ZoomProvider(props: ZoomProviderProps) {
           );
         } else {
           const from = wasLanded ? dest : m.heroRect!;
-          startFlight(it, hero, from, heroTarget, m.pre ?? prepareFlight(id, hero), target === "open" ? trackAt(index) : null);
+          startFlight(it, hero, from, heroTarget, m.pre ?? prepareFlight(id, hero, src.el), target === "open" ? trackAt(index) : null, dest);
           // The hero was moving with its card: its centre's speed follows from the card's.
           const f = it.flight!;
           const fvx = wasLanded ? 0 : toward(cvx + cvs * (off.x + off.w / 2), f.to.cx - f.cx.get());
@@ -1697,6 +1750,16 @@ export function ZoomProvider(props: ZoomProviderProps) {
       else finishReopen();
     });
   };
+
+  // A resize during a transition re-laid out the cards: send them toward the new layout
+  // from wherever they are now (the same turn-around a tap mid-close uses), rather than
+  // finishing at the old size and snapping once open.
+  useLayoutEffect(() => {
+    const target = S.reaim;
+    S.reaim = null;
+    if (!target || (target === "open" ? S.phase !== "opening" : S.phase !== "closing")) return;
+    transitionCards(target, S.index);
+  }, [layout]);
 
   const finishReopen = () => {
     // Back to the resting open state.
@@ -1819,7 +1882,29 @@ export function ZoomProvider(props: ZoomProviderProps) {
     dimOpacity.jump(0);
     setSession(null);
     const focusable = focusTarget?.closest<HTMLElement>("button, a[href], [tabindex]") ?? focusTarget;
-    focusable?.focus({ preventScroll: true });
+    if (focusable) returnFocus(focusable, S.pointerOpened);
+  };
+
+  /**
+   * Focus goes back to what opened the card, for keyboard and screen-reader users. If
+   * it was opened with a mouse or finger, the focus ring stays hidden there (even after
+   * closing with Esc) until the next key press, as browsers do for a click.
+   */
+  const returnFocus = (el: HTMLElement, quiet: boolean) => {
+    if (!quiet) {
+      el.focus({ preventScroll: true });
+      return;
+    }
+    el.setAttribute("data-zoom-quiet-focus", "");
+    // focusVisible: false is the standard way to ask for no ring, where browsers support it.
+    el.focus({ preventScroll: true, focusVisible: false } as FocusOptions);
+    const clear = () => {
+      el.removeAttribute("data-zoom-quiet-focus");
+      el.removeEventListener("blur", clear);
+      document.removeEventListener("keydown", clear, true);
+    };
+    el.addEventListener("blur", clear);
+    document.addEventListener("keydown", clear, true);
   };
 
   /* -------------------------------------------------------------- wiring */
@@ -1840,6 +1925,13 @@ export function ZoomProvider(props: ZoomProviderProps) {
       index: () => S.index,
       layout: () => S.L!,
       activeCard: () => cardEls.current.get(S.ids[S.index]) ?? null,
+      cardAt: (x, y) => {
+        const j = S.ids.findIndex((id) => {
+          const r = cardEls.current.get(id)?.getBoundingClientRect();
+          return !!r && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+        });
+        return j < 0 ? null : j;
+      },
       activeScroller: () =>
         cardEls.current.get(S.ids[S.index])?.querySelector<HTMLElement>(".zoom-card-scroll") ?? null,
       track,
@@ -1881,6 +1973,13 @@ export function ZoomProvider(props: ZoomProviderProps) {
     };
     gesturesRef.current = gestures;
     window.addEventListener("keydown", onKey);
+    // Which kind of input came last, so focus returns without a ring after a pointer open.
+    const onPointerInput = () => (S.input = "pointer");
+    const onKeyInput = (e: KeyboardEvent) => {
+      if (!["Shift", "Control", "Alt", "Meta"].includes(e.key)) S.input = "keyboard";
+    };
+    document.addEventListener("pointerdown", onPointerInput, true);
+    document.addEventListener("keydown", onKeyInput, true);
     // Scrolling during a transition:
     // - inside a card while its hero is still flying in: the flight follows (see startFlight);
     // - the page while cards are flying home: their sources moved, so re-aim them,
@@ -1935,15 +2034,22 @@ export function ZoomProvider(props: ZoomProviderProps) {
     };
     window.addEventListener("popstate", onPop);
     const ro = new ResizeObserver(() => {
-      if (S.phase !== "open") return;
+      if (S.phase === "idle" || !S.L || (root.clientWidth === S.L.W && root.clientHeight === S.L.H)) return;
       S.L = computeLayout();
       setLayout(S.L);
-      track.jump(trackAt(S.index));
+      if (S.phase === "open" || S.reduced) {
+        track.jump(trackAt(S.index));
+        return;
+      }
+      // Mid-transition: head for the new layout straight away (see the effect on layout).
+      S.reaim = S.phase === "opening" ? "open" : "sources";
     });
     ro.observe(root);
     return () => {
       gestures.detach();
       window.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onPointerInput, true);
+      document.removeEventListener("keydown", onKeyInput, true);
       window.removeEventListener("popstate", onPop);
       document.removeEventListener("scroll", onAnyScroll, { capture: true });
       cancelAnimationFrame(reaim);
