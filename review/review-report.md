@@ -87,7 +87,7 @@ All 33 browser tests pass: 31 behaviour checks, plus the 2 known limitations, wh
 ### Documentation
 
 - `README.md` is the short guide for people.
-- `AGENTS.md` is the full reference for coding agents: files, every prop and its default, the markup contract, content requirements, invariants to keep when changing the code, and how to test. `CLAUDE.md` points to it.
+- `AGENTS.md` is the full reference for coding agents: files, every prop and its default, the markup contract, content requirements, invariants to keep when changing the code, and how to test.
 - The JSDoc on the props in `ZoomProvider.tsx` is the source of truth. It has been corrected where it described old behaviour: `background` and `container` (the automatic inert), `landing` (the default placement now puts the hero on the source), and dismiss drags being touch-only. Missing defaults were added: `dim`, `timeScale`, `getLabel`, `closeLabel`.
 
 ### Recommended setup for a portfolio on Cloudflare: Astro
