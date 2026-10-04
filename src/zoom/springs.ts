@@ -12,9 +12,9 @@ export type ZoomTiming = {
   page: SpringSpec;
   /** Snapping back when a dismiss drag is let go early. */
   cancel: SpringSpec;
-  /** Reduced motion: opacity-only open. */
+  /** Fades: a card with no source to return to, and the group's dimming swapping over while open. */
   fade: SpringSpec;
-  /** Reduced motion: opacity-only close. */
+  /** Unused since reduced motion became instant (no fade). Kept so existing timing props still type-check. */
   fadeOut: SpringSpec;
 };
 
@@ -50,22 +50,55 @@ export const REST = {
   opacity: 0.002,
 };
 
+/** The latest springTo per value, so a stale safety timer never overrides a newer animation. */
+const latestSpring = new WeakMap<MotionValue<number>, object>();
+
 export function springTo(
   value: MotionValue<number>,
   to: number,
   spec: SpringSpec,
   opts: { velocity?: number; restDelta?: number; speed?: number } = {},
 ): Promise<void> {
+  // A spring to or from a value that isn't a real number never settles, which used to
+  // leave a transition hanging forever (and the page locked). Land at once instead.
+  if (!Number.isFinite(to)) return Promise.resolve();
+  if (!Number.isFinite(value.get())) {
+    value.jump(to);
+    return Promise.resolve();
+  }
   const restDelta = opts.restDelta ?? REST.px;
+  const velocity = opts.velocity !== undefined && Number.isFinite(opts.velocity) ? opts.velocity : undefined;
   const controls = animate(value, to, {
     type: "spring",
     ...springPhysics(spec),
     restDelta,
     restSpeed: restDelta * 12,
-    ...(opts.velocity === undefined ? {} : { velocity: opts.velocity }),
+    ...(velocity === undefined ? {} : { velocity }),
   });
-  if (opts.speed !== undefined && opts.speed !== 1) controls.speed = opts.speed;
-  return new Promise<void>((resolve) => controls.then(() => resolve()));
+  const speed = opts.speed ?? 1;
+  if (speed !== 1) controls.speed = speed;
+  const token = {};
+  latestSpring.set(value, token);
+  return new Promise<void>((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve();
+    };
+    // Safety net: a spring still moving long after it should have settled is finished by
+    // hand, so no transition can hang. Well beyond any real settle time, even in slow motion.
+    const limit = ((spec.duration * 6) / Math.max(speed, 0.01) + 1) * 1000;
+    const timer = setTimeout(() => {
+      if (latestSpring.get(value) === token) {
+        controls.stop();
+        value.jump(to);
+      }
+      finish();
+    }, limit);
+    controls.then(finish);
+  });
 }
 
 /** UIScrollView's rubber-band curve (constant 0.55). */

@@ -64,11 +64,15 @@ export type GestureController = {
 };
 
 /**
- * Touch and mouse handling for the open pager. Touch uses touch events so a
- * vertical drag can either scroll the card natively or, at the top of the card,
- * become a dismiss (or, in a vertical pager, turn the page) — the decision is made
- * on the first move, before scrolling starts. Motion's own drag/pan gestures can't
- * make that hand-off with native scroll.
+ * Touch handling for the open pager. Touch uses touch events so a vertical drag can
+ * either scroll the card natively or, at the top of the card, become a dismiss (or, in
+ * a vertical pager, turn the page) — the decision is made on the first move, before
+ * scrolling starts. Motion's own drag/pan gestures can't make that hand-off with
+ * native scroll.
+ *
+ * A mouse doesn't drag cards: pressing and dragging with a mouse selects text, as on
+ * any page. Mouse and trackpad users page with the wheel or arrow keys, and close by
+ * scrolling past the card's top, Esc, the close button, or a click outside the card.
  *
  * Horizontal pager: sideways drags page, vertical drags at an edge dismiss.
  * Vertical pager: vertical drags at an edge page, sideways drags dismiss.
@@ -81,7 +85,6 @@ export function attachGestures(root: HTMLElement, c: GestureController) {
   type Axis = "page" | "dismiss" | "scroll" | "none" | null;
   const G = {
     on: false,
-    type: "touch" as "touch" | "mouse",
     x0: 0,
     y0: 0,
     axis: null as Axis,
@@ -104,12 +107,12 @@ export function attachGestures(root: HTMLElement, c: GestureController) {
   };
   let suppressClickUntil = 0;
 
-  const start = (x: number, y: number, t: number, type: "touch" | "mouse", target: EventTarget | null) => {
+  const start = (x: number, y: number, t: number, target: EventTarget | null) => {
     // A touch can begin while the card is still opening; it takes effect once open.
     const phase = c.phase();
     if (phase !== "open" && phase !== "opening") return;
     stopGlide();
-    Object.assign(G, { on: true, type, x0: x, y0: y, axis: null, samples: [{ t, x, y }], startIndex: c.index(), pulled: 0, target });
+    Object.assign(G, { on: true, x0: x, y0: y, axis: null, samples: [{ t, x, y }], startIndex: c.index(), pulled: 0, target });
   };
   /** A page turn is still settling: the track isn't at the visible card yet. */
   const turning = () => Math.abs(c.track.get() - c.trackAt(c.index())) > 0.5;
@@ -186,7 +189,7 @@ export function attachGestures(root: HTMLElement, c: GestureController) {
     let dy = y - G.y0;
     if (!G.axis) {
       if (c.phase() !== "open") return false;
-      if (Math.hypot(dx, dy) < (G.type === "touch" ? 3 : 5)) return false;
+      if (Math.hypot(dx, dy) < 3) return false;
       const L0 = c.layout();
       const scroller = c.activeScroller();
       const drag = c.dismiss().drag;
@@ -218,7 +221,7 @@ export function attachGestures(root: HTMLElement, c: GestureController) {
         }
         // At the top pulling down, or at the bottom pushing up: the previous or next page.
         else if (!sideways && ((dy > 0 && atTop) || (dy < 0 && atBottom))) startPaging();
-        else if (!sideways && G.type === "touch" && scroller && (turning() || offCard(G.target))) {
+        else if (!sideways && scroller && (turning() || offCard(G.target))) {
           G.axis = "scroll";
           G.scroll0 = scroller.scrollTop;
         } else {
@@ -317,41 +320,14 @@ export function attachGestures(root: HTMLElement, c: GestureController) {
       return;
     }
     const p = e.touches[0];
-    start(p.clientX, p.clientY, e.timeStamp, "touch", e.target);
+    start(p.clientX, p.clientY, e.timeStamp, e.target);
   };
   const onTouchMove = (e: TouchEvent) => {
-    if (!G.on || G.type !== "touch") return;
+    if (!G.on) return;
     const p = e.touches[0];
     if (move(p.clientX, p.clientY, e.timeStamp) && e.cancelable) e.preventDefault();
   };
-  const onTouchEnd = (e: TouchEvent) => {
-    if (G.type === "touch") end(e.timeStamp);
-  };
-  // A mouse drag is followed on the window (it may leave the card), but only while
-  // one is in progress, so ordinary mouse movement on the page costs nothing.
-  const followPointer = (on: boolean) => {
-    if (on) {
-      window.addEventListener("pointermove", onPointerMove);
-      window.addEventListener("pointerup", onPointerUp);
-      window.addEventListener("pointercancel", onPointerUp);
-    } else {
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", onPointerUp);
-      window.removeEventListener("pointercancel", onPointerUp);
-    }
-  };
-  const onPointerDown = (e: PointerEvent) => {
-    if (e.pointerType === "touch" || e.button !== 0) return;
-    start(e.clientX, e.clientY, e.timeStamp, "mouse", e.target);
-    if (G.on) followPointer(true);
-  };
-  const onPointerMove = (e: PointerEvent) => {
-    if (G.on && G.type === "mouse") move(e.clientX, e.clientY, e.timeStamp);
-  };
-  const onPointerUp = (e: PointerEvent) => {
-    followPointer(false);
-    if (G.on && G.type === "mouse") end(e.timeStamp);
-  };
+  const onTouchEnd = (e: TouchEvent) => end(e.timeStamp);
 
   /* ---------------------------------------------------------- tuning aids */
 
@@ -749,6 +725,10 @@ export function attachGestures(root: HTMLElement, c: GestureController) {
       c.close();
       return;
     }
+    // A text selection dragged out past the card ends in a click outside it; that's
+    // selecting, not a request to close or page.
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed && sel.anchorNode && root.contains(sel.anchorNode)) return;
     if (c.layout().stream) {
       // Every card in a stream is content; only a tap off all of them closes.
       if (target.closest(".zoom-card")) return;
@@ -776,7 +756,6 @@ export function attachGestures(root: HTMLElement, c: GestureController) {
   root.addEventListener("touchmove", onTouchMove, { passive: false });
   root.addEventListener("touchend", onTouchEnd);
   root.addEventListener("touchcancel", onTouchEnd);
-  root.addEventListener("pointerdown", onPointerDown);
   root.addEventListener("wheel", onWheel, { passive: false });
   // Track when card content last moved (scroll events don't bubble, but capture sees them).
   const onScroll = () => {
@@ -828,8 +807,6 @@ export function attachGestures(root: HTMLElement, c: GestureController) {
     root.removeEventListener("touchmove", onTouchMove);
     root.removeEventListener("touchend", onTouchEnd);
     root.removeEventListener("touchcancel", onTouchEnd);
-    root.removeEventListener("pointerdown", onPointerDown);
-    followPointer(false);
     root.removeEventListener("wheel", onWheel);
     stopSwallowing();
     root.removeEventListener("scroll", onScroll, { capture: true });

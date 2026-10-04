@@ -7,9 +7,9 @@
   visibility: hidden;
   pointer-events: none;
   touch-action: pan-y;
-  -webkit-user-select: none;
-  user-select: none;
 }
+/* Text in an open card stays selectable; only a touch drag in progress turns selection off. */
+.zoom-dragging { -webkit-user-select: none; user-select: none; }
 .zoom-root.zoom-fixed { position: fixed; z-index: 1000; }
 .zoom-root[data-open] { visibility: visible; pointer-events: auto; }
 /* While closing, the page behind is live again (tap a source to turn the close

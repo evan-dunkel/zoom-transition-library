@@ -4,10 +4,8 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc -p .",
-    "build:demo": "python3 build.py",
-    "build:harness": "esbuild test/scan.tsx --bundle --minify --format=iife --target=es2020 --define:process.env.NODE_ENV=\\\"production\\\" --outfile=test/scan.js",
-    "test": "playwright test",
-    "build:portfolio": "python3 standalone/portfolio/build.py"
+    "test": "npm --prefix review/harness test",
+    "demo": "npm --prefix review/harness run build -- --demo"
   },
   "dependencies": {
     "motion": "^13.5.0",

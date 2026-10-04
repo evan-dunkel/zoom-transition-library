@@ -1,9 +1,10 @@
 import { cancelFrame, frame, motionValue, type MotionValue } from "motion/react";
 import { clamp } from "./springs";
 
-export type Rect = { x: number; y: number; w: number; h: number };
+/** A box on screen. r: its corner radius on screen (px); left out, the hero's own radius is used. */
+export type Rect = { x: number; y: number; w: number; h: number; r?: number };
 
-type Fit = { s: number; cx: number; cy: number; ix: number; iy: number };
+type Fit = { s: number; cx: number; cy: number; ix: number; iy: number; r: number };
 
 export type Flight = {
   cx: MotionValue<number>;
@@ -39,6 +40,12 @@ export function measureHero(hero: HTMLElement): HeroMetrics {
   const cs = getComputedStyle(hero);
   return { W0: hero.offsetWidth, H0: hero.offsetHeight, radius: readRadius(hero), shadow: cs.boxShadow, shadowRadius: cs.borderRadius };
 }
+
+/**
+ * A hero with no size yet (typically an image still downloading, with no width/height
+ * or aspect-ratio to reserve its space) can't be flown: there is nothing to scale.
+ */
+export const canFly = (m: HeroMetrics) => m.W0 >= 1 && m.H0 >= 1;
 
 /**
  * The still copy that flies. Live heroes only show it for the frame or so before
@@ -93,13 +100,15 @@ export function createFlight(
 ): Flight {
   const { W0, H0, radius, shadow, shadowRadius } = opts.metrics ?? measureHero(hero);
   const fit = (r: Rect): Fit => {
-    const s = Math.max(r.w / W0, r.h / H0);
+    const s = Math.max(r.w / W0, r.h / H0, 1e-6);
     return {
       s,
       cx: r.x + r.w / 2,
       cy: r.y + r.h / 2,
       ix: Math.max(0, (W0 - r.w / s) / 2),
       iy: Math.max(0, (H0 - r.h / s) / 2),
+      // On screen, so the corners can blend from the source's radius to the hero's.
+      r: r.r ?? radius * s,
     };
   };
   let A = fit(from);
@@ -144,12 +153,14 @@ export function createFlight(
 
   const crop = (sv: number) => {
     const t = A.s === B.s ? 1 : clamp((sv - A.s) / (B.s - A.s), 0, 1);
-    return { ix: A.ix + (B.ix - A.ix) * t, iy: A.iy + (B.iy - A.iy) * t };
+    return { ix: A.ix + (B.ix - A.ix) * t, iy: A.iy + (B.iy - A.iy) * t, r: A.r + (B.r - A.r) * t };
   };
   const write = () => {
     scheduled = false;
     const sv = s.get();
-    const { ix, iy } = crop(sv);
+    const { ix, iy, r } = crop(sv);
+    // The corner radius in the copy's own (unscaled) units.
+    const round = r > 0.25 && sv > 0 ? r / sv : 0;
     const o = opts.offset ? opts.offset() : { x: 0, y: 0 };
     const left = cx.get() + o.x - (W0 * sv) / 2;
     const top = cy.get() + o.y - (H0 * sv) / 2;
@@ -159,8 +170,9 @@ export function createFlight(
     // anything the hero paints outside its own box (a shadow, a cover swung open
     // in 3D, a glow), so every side that isn't being cropped is pushed far out
     // (negative inset) instead of sitting on the box edge.
-    const cropX = ix > 0.5;
-    const cropY = iy > 0.5;
+    // Rounded corners have to sit on the box's edges, so rounding clips every side.
+    const cropX = ix > 0.5 || round > 0;
+    const cropY = iy > 0.5 || round > 0;
     let it = cropY ? iy : -OUTSIDE;
     let ib = cropY ? iy : -OUTSIDE;
     const band = opts.clip ? opts.clip() : null;
@@ -171,7 +183,7 @@ export function createFlight(
     const ixs = cropX ? ix : -OUTSIDE;
     el.style.clipPath =
       cropX || it > -OUTSIDE || ib > -OUTSIDE
-        ? `inset(${it}px ${ixs}px ${ib}px ${ixs}px${cropX || cropY ? ` round ${radius}px` : ""})`
+        ? `inset(${it}px ${ixs}px ${ib}px ${ixs}px${round > 0 ? ` round ${round}px` : ""})`
         : "";
   };
   // Three values change each frame; write the style once, in Motion's render step.
@@ -210,10 +222,17 @@ export function createFlight(
   return flight;
 }
 
-function readRadius(hero: HTMLElement) {
-  const target = (hero.firstElementChild as HTMLElement | null) ?? hero;
-  const value = getComputedStyle(target).borderTopLeftRadius;
-  return value.endsWith("px") ? parseFloat(value) : 0;
+/** An element's top-left corner radius in px: its own, or (if it has none) its first child's, e.g. a rounded <img>. */
+export function readRadius(el: HTMLElement) {
+  const own = radiusOf(el);
+  if (own > 0) return own;
+  const child = el.firstElementChild as HTMLElement | null;
+  return child ? radiusOf(child) : 0;
+}
+function radiusOf(el: HTMLElement) {
+  const value = getComputedStyle(el).borderTopLeftRadius.split(" ")[0];
+  if (value.endsWith("%")) return (parseFloat(value) / 100) * Math.min(el.offsetWidth, el.offsetHeight);
+  return parseFloat(value) || 0;
 }
 
 const MAX_FROZEN = 300;
