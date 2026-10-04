@@ -1,6 +1,6 @@
 # Zoom transition library: independent review
 
-**What I reviewed:** the library as it is now on this branch (`src/zoom/`, 10 files, about 3,700 lines). That is the version after several earlier rounds of AI-written fixes, not the zip as first imported. I did not change any library file.
+**What I reviewed:** the library on this branch (`src/zoom/`, 10 files, about 3,700 lines), as it was after several earlier rounds of AI-written fixes (not the zip as first imported). The review itself changed no library file. **Round 3** (below) then fixed the issues at your request; the rest of the report describes the library *before* those fixes, and the Round 3 table says what changed for each issue.
 **How:** I read every line of the library. I ran the type check and the repository's own browser test suite. Then I wrote my own test app and probes (`review/independent-review/`) and ran them in headless Chromium to confirm each problem below.
 **Labels:** **[Confirmed]** = I reproduced it in a browser. **[Code]** = from reading the code, not reproduced. **[Uncertain]** = my best judgement; treat it as a question, not a fact.
 **Biggest limit of this review:** Chromium was the only browser I had. Nothing here was tested in Safari, Firefox, or on a real phone, and headless Chromium's timings are only a rough guide to how a phone performs.
@@ -8,6 +8,8 @@
 ---
 
 ## Verdict
+
+**After Round 3: usable for your portfolio, with the caveats below.** Every Critical and Important issue is fixed and covered by a browser test. Before the fixes, my verdict was:
 
 **Usable with fixes. It doesn't need a rewrite.** The hard parts are done well, and I confirmed them in the browser:
 - The picture leaves from and lands on the right spot to within 1 px, on scrolled pages and at phone width.
@@ -28,6 +30,57 @@ Other cautions:
 - The repository's own test command fails if you follow the README's install steps.
 
 If you or a developer will maintain it, budget time to own that complexity. If you only need a portfolio grid, compare it with the browser's built-in View Transitions API, which needs far less code (see "Uncertain").
+
+**What still holds after the fixes:**
+- Still tested only in headless Chromium, not in Safari, Firefox or on a real phone.
+- The file is now about 2,700 lines, and the fixes were also written by AI. The new tests reduce the risk, but don't remove it.
+- The smaller limitations listed as "remains" in the Round 3 table.
+
+---
+
+## Round 3: the fixes
+
+You asked me to fix the issues, set page turns to 0.25 s with no bounce, and remove unused code. Library changes are in `src/zoom/`; tests are in `review/harness/tests/fixes.spec.ts`.
+
+**How each fix was verified:**
+- Each fix has a browser test. I ran every new test against the library as it was *before* the fixes: all 15 failed there, and they all pass now.
+- The whole suite (49 tests) passes, including the 34 earlier ones.
+- The new tests passed 5 runs in a row with 4 running at once, to rule out timing flukes.
+- I re-ran every probe from this report.
+
+| # | Issue | Status | What changed | Measured after |
+|---|---|---|---|---|
+| C1 | Empty grey box flies on a first open | **Fixed** | While the big image downloads, the copy shows the thumbnail's own picture (an `img`, or an inline `svg`), then switches to the big image when it arrives. The live hero stays hidden behind it until its image has loaded. (`flight.ts`: `sourcePicture`, `createFlight`) | 0% blank frames at every delay tested, from 0 ms to 1 s (was up to 100%). `evidence/slow-takeoff-after.png` |
+| I1 | Opening freezes, worse with gallery size; downloads every photo | **Fixed** | Opening builds only the opened card and its two neighbours. The rest are built after landing, three at a time while idle. On closing, cards whose thumbnail is off screen fade instead of flying. (`S.ready`, `fillCards`) | Freeze at the tap, CPU 4× slower (median of 3 runs, before → after): 9 items 159 → 130 ms, 48 items 425 → 158 ms. Closing, 48 items: 205 → 94 ms. The first open at phone width is now smooth from the first frame. |
+| I2 | Sideways content in a card can't scroll | **Fixed** | A strip or table that can still scroll that way gets the swipe (trackpad, wheel and touch); paging resumes at its end. The rest of a swipe that hit the end doesn't turn the page. (`gestures.ts`: `canScrollX`) | Strip scrolled 360 px (trackpad) and 184 px (touch); card unchanged |
+| I3 | Focus not moved into the card without a ✕; focus on nothing during opening | **Fixed** | Focus moves at the start of opening, to the `[data-zoom-close]` element, or to the card itself if there isn't one (`focusCard`). | Focus is inside the dialog at 50 ms, both with and without the ✕ |
+| I4 | Same item twice: zoom starts from the wrong copy | **Fixed** | Every copy is remembered. Opening uses the copy that was clicked or focused, and the card lands back on it. (`pickSources`) | Starts within 1 px of the clicked featured tile |
+| I5 | One broken item blanks the page | **Fixed** | Each card's content, and its flying copy, is wrapped in an error boundary that shows "This item couldn't be shown." (`DestinationBoundary`) | Page and other items keep working |
+| I6 | Other thumbnails blink out at the tap | **Fixed** | They now fade out as the card opens and back as it closes. `hideGroupWhileOpen` (default) uses the existing `groupOpacity` mechanism at 0. | Only the clicked thumbnail is hidden at take-off. `evidence/takeoff-30ms-after.png` |
+| I7 | No deep links | **Fixed for `#id` addresses** | A page loaded at an item's `#id` (the default address) opens that card instantly; closing removes the `#id` from the address. Your own URLs (`/work/slug`) still need real pages. | Reloaded `#rapid-3` opens `rapid-3`; the next open flies normally |
+| I8 | Test command fails with the README's install steps | **Fixed** | The test and demo bundles always use one copy of React. | Suite passes after `npm install && npm --prefix review/harness install` |
+| I9 | Focus taken back after the visitor moved on | **Fixed** | Focus moves only from where the library left it, and never into a frame that doesn't have focus (`mayMoveFocus`). | Typed "abcd" stays in the search box |
+| M1 | Picture pops over a sticky header | **Fixed (mostly)** | At open and close, the library finds what covers each on-screen thumbnail. The flying picture and its card stay below that header near the thumbnail, opening out over the first third of the zoom. **Remains:** the faint neighbouring cards can pass over the header for a moment. | Flying copy starts at y = 59, just below the 60 px header (was −27). `evidence/sticky-takeoff-after.png` |
+| M2 | ✕ floats outside the growing card | **Fixed** | The ✕ copy is clipped to the card's current shape. | Before and after: `evidence/takeoff-150ms.png`, `evidence/takeoff-150ms-after.png` |
+| M3 | `clip-path` repainted every frame | Remains | Not changed. It needs a real phone to judge. | |
+| M4 | Off-screen thumbnail: page scrolls instantly on close | Remains | Deliberate trade-off, kept. | |
+| M5 | Resize mid-zoom jumps to the end | Remains | Deliberate trade-off, kept. | |
+| M6 | Video, canvas or iframe heroes in a live flight | Remains | Documented: use `live={false}` for those. | |
+| M7 | Pinch-zoom possibly blocked | **Fixed** (untested on a phone) | `touch-action: pan-y pinch-zoom`. | |
+| M8 | Unmount while open doesn't return focus | **Fixed** | Focus goes back to the opener. The extra history entry is left alone on purpose: removing it would undo the navigation that caused the unmount. | |
+| M9 | Plain-HTML mode misses thumbnails added later | **Fixed** | The page is watched; new `[data-zoom-source]` elements are picked up, and removed ones let go. | Test: a tile added after load opens |
+| M10 | Unused and duplicated code | **Fixed** | Removed the unused `fadeOut` timing option, the duplicate `activeProgress` (merged into `progressOf` and `visibleProgress`), the "hide the whole group at once" branch the new fade replaced, and an unused `side` field. I checked every remaining declaration for references; nothing else is unused. | |
+| M11 | Turn-around stops fast cards dead | **Fixed** | The cause was in slow motion only: speeds were handed to springs that run on a slowed clock, without converting. `springTo` now converts. At normal speed, turn-arounds already carried their speed. | 0 jerks across 4 turn-arounds at ×0.1 (829 frames) |
+| M12 | Page turns creep | **Fixed** | `timing.page` is now 0.25 s, no bounce (it was 0.5 s). | 90% there at 175 ms; fully at rest at about 475 ms (was 332 ms and 850 ms) |
+| M13 | ✕ on every card | **Fixed** | The default theme hides the ✕ on inactive cards. | Only the visible card's ✕ is shown |
+
+**Changed defaults to know about:**
+- `timing.page` is 0.25 s.
+- The rest of the group fades out with the opening instead of disappearing at once.
+- Opening from an `#id` address on page load opens the card.
+- Card content for the rest of the group is built after landing. If your content runs code when it mounts, that now happens a moment later.
+
+**Docs:** `README.md`, `AGENTS.md` and the option comments in `ZoomProvider.tsx` are updated. The current demo is `review/independent-review/zoom-demo.html`. The first review's demo (`review/demo/`) is left as it was; its notes describe that earlier round.
 
 ---
 
@@ -369,11 +422,12 @@ Import `zoom.css` for the default look, or `zoom.base.css` to style everything y
 |---|---|
 | `review/independent-review/zoom-demo.html` | The double-click demo: 9 labelled scenarios, each with a checklist, a page-turn timing switch, a general-notes box and a "Copy results" button |
 | `review/independent-review/review-report.md` | This report |
-| `review/independent-review/evidence/*.png` | Screenshots referenced above |
+| `review/independent-review/evidence/*.png` | Screenshots referenced above (`*-after.png`: the same moment after the Round 3 fixes) |
 | `review/independent-review/probes/*.mjs` | The browser probes behind each [Confirmed] finding |
+| `review/harness/tests/fixes.spec.ts` | Browser tests for the Round 3 fixes (run with `npm test`) |
 | `review/independent-review/demo-src/` | Source of the demo and probe app (uses `src/zoom` unchanged) |
 
 To re-run:
 - `npm --prefix review/harness install`. Don't also run the root `npm install`; see I8.
 - `node review/independent-review/build.mjs`.
-- `node review/independent-review/probes/findings.mjs`, and likewise `perf.mjs`, `first-open-network.mjs`, `sticky.mjs`, `round2.mjs`, `turnaround.mjs` and `demo-check.mjs`.
+- `node review/independent-review/probes/findings.mjs`, and likewise `perf.mjs`, `first-open-network.mjs`, `sticky.mjs`, `round2.mjs`, `turnaround.mjs`, `cost-median.mjs` and `demo-check.mjs`.

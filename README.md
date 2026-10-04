@@ -28,12 +28,13 @@ function Project({ id }) {
 ```
 
 **Good to know**
-- **Reserve image sizes** with `width`/`height`. An image that hasn't loaded yet can't fly; the card still opens, without the flying image.
+- **Reserve image sizes** with `width`/`height`. An image with no size yet can't fly; the card still opens, without the flying image. A detail image that has its size but is still downloading flies as the thumbnail's picture until it arrives.
 - **The thumbnail and the card image can have different shapes.** The picture's crop changes smoothly in flight.
 - **Close** with Esc, the ✕, a click outside the cards, scrolling past the top, or a downward swipe on touch.
 - **Mice don't drag cards.** Dragging with a mouse selects text instead.
+- **Content that scrolls sideways** inside a card (a photo strip, a wide table) scrolls first; a sideways swipe turns the page once it reaches its end.
 - **Reduced motion** makes opening and closing instant.
-- **For real addresses**, add `history={{ mode: "item", url: (id) => "/work/" + id }}` and give each project a real page there, so links and reloads work.
+- **Addresses:** `history={{ mode: "session" }}` gives each open card a `#id` address; reloading or sharing it opens that card. For real addresses, use `history={{ mode: "item", url: (id) => "/work/" + id }}` and give each project a real page there.
 
 **Styling:** `zoom.css` is the structure plus a default look. To style it all yourself, import `zoom.base.css` alone. Or keep the look and change it with `--zoom-card-bg`, `--zoom-card-radius`, `--zoom-dim-color` and friends; your own CSS always wins.
 
@@ -46,4 +47,5 @@ npm run demo:serve   # demo on your network (open it on a phone)
 
 **More detail:**
 - Every option: `AGENTS.md`, or the comments in `src/zoom/ZoomProvider.tsx`.
-- How the library was reviewed and fixed: `review/review-report.md`.
+- How the library was reviewed and fixed: `review/independent-review/review-report.md` (latest), and `review/review-report.md` (the first rounds).
+- Try it: open `review/independent-review/zoom-demo.html` in a browser.

@@ -3,7 +3,8 @@
 // website, and the phone scenario gets a real 390 px wide window. A checklist under each
 // scenario records what the viewer saw; "Copy results" puts it on the clipboard as text.
 
-// k: "ok" = should work (confirm it), "bug" = a problem I found (confirm you see it), "look" = judge it yourself.
+// k: "ok" = should work (confirm it), "fixed" = a problem from the report that is now fixed (confirm
+// it's gone), "known" = a limitation that remains, "look" = judge it yourself.
 const SCENARIOS = [
   {
     id: "grid",
@@ -12,10 +13,11 @@ const SCENARIOS = [
     checks: [
       { k: "ok", t: "The picture leaves exactly from its thumbnail and lands exactly at the top of the card, with no jump at either end. (Turn on slow motion at the top to see it clearly.)" },
       { k: "ok", t: "Closing sends the picture back into its own thumbnail, and the page looks exactly as before." },
-      { k: "look", t: "The motion feels good to you: speed, slight bounce, the way the card grows out of the picture." },
-      { k: "bug", t: "At the moment you click, the other thumbnails on the page blink out (most visible on the second row), and stay hidden until the card has closed." },
-      { k: "bug", t: "In slow motion, the ✕ button can be seen floating just outside the top-right of the growing card during the first part of the opening." },
-      { k: "look", t: "Page turns (← →): try the “Page turn” switch at the top of this page. Which setting feels right on your display? (Say which in the note.)" },
+      { k: "fixed", t: "At the moment you click, the other thumbnails no longer blink out: they fade away as the card opens, and fade back as it closes." },
+      { k: "fixed", t: "In slow motion, the ✕ no longer floats outside the growing card; it appears only once the card has grown to where it sits." },
+      { k: "fixed", t: "Only the visible card shows a ✕; the neighbours peeking in at the sides don't." },
+      { k: "fixed", t: "Page turns (← →) settle quickly, without a long slow creep at the end. The new default is 0.25 s with no bounce; the “Page turn” switch at the top lets you compare it with 0.35 s and the old 0.5 s." },
+      { k: "look", t: "The motion feels good to you overall: speed, slight bounce, the way the card grows out of the picture." },
     ],
   },
   {
@@ -25,7 +27,8 @@ const SCENARIOS = [
     checks: [
       { k: "ok", t: "After scrolling, the zoom still starts exactly from the thumbnail you clicked." },
       { k: "ok", t: "After closing, you are at the same scroll position as before." },
-      { k: "bug", t: "Scroll so a thumbnail is half hidden under the header, then click its title. The hidden half pops out on top of the header in the first frame (and on closing it lands on top, then snaps underneath)." },
+      { k: "fixed", t: "Scroll so a thumbnail is half hidden under the header, then click its title. The flying picture now stays below the header at take-off (and on landing), instead of popping out on top of it." },
+      { k: "known", t: "In that same case, the faint neighbouring cards can still pass over the header for a moment as they fade in." },
     ],
   },
   {
@@ -34,6 +37,7 @@ const SCENARIOS = [
     phone: true,
     what: "A phone-width list with small square thumbnails that open into full-height cards: a big change of shape. For touch, use “Open in new tab” and your browser's device mode (Chrome: Cmd/Ctrl+Shift+M), or open the file on a phone.",
     checks: [
+      { k: "fixed", t: "First open after loading: the neighbouring cards now fade in smoothly from the start, instead of appearing already partway in. (Reload this frame to try a first open again.)" },
       { k: "ok", t: "The picture grows from the small square into the wide picture at the top of the card, its crop changing smoothly with no jump." },
       { k: "ok", t: "Closing shrinks it back into its own square." },
       { k: "look", t: "(Touch, optional) Dragging down from the top of the card closes it; dragging sideways moves to the next walk." },
@@ -52,11 +56,13 @@ const SCENARIOS = [
   },
   {
     id: "rapid",
-    title: "5. Rapid repeated clicks and interruptions",
-    what: "The buttons in the frame run quick sequences by themselves: double-click, ten fast clicks, Esc or Back half way, clicking a card as it flies home, random input. Try the same by hand too. Browser history is on here, so Back closes the card.",
+    title: "5. Rapid repeated clicks, interruptions and shared links",
+    what: "The buttons in the frame run quick sequences by themselves: double-click, ten fast clicks, Esc or Back half way, clicking a card as it flies home, random input. Try the same by hand too, including in very slow motion. Browser history is on here, so Back closes the card, and each open card has its own #address.",
     checks: [
       { k: "ok", t: "After each sequence settles, the dark status bar at the bottom says “clean ✓” (press Esc first if a card is left open)." },
-      { k: "ok", t: "Clicking a card while it shrinks home turns it around smoothly instead of restarting." },
+      { k: "fixed", t: "In very slow motion, click a card, Esc, click it again as it flies home, Esc… The cards now curve back smoothly instead of stopping dead and jumping left and right." },
+      { k: "fixed", t: "While typing in a note field on this page, the frames no longer pull focus away from you when their transitions finish." },
+      { k: "fixed", t: "Press “Open in new tab”, open a card there, then reload that tab: the card is open again. Close it: the #… disappears from the address." },
       { k: "look", t: "Nothing ever gets stuck, flickers, or ends up in the wrong place." },
     ],
   },
@@ -65,39 +71,52 @@ const SCENARIOS = [
     title: "6. Detail photos that are still downloading",
     what: "On a real site the thumbnail and the big detail photo are different files, and the big one only starts downloading when you click. Here the big photos take 1.5 seconds to arrive the first time each card opens (they're remembered after that).",
     checks: [
-      { k: "bug", t: "First open of each card: the thumbnail vanishes and an empty grey box (with the photo's description text in its corner) zooms up instead of the picture. The photo pops in later." },
-      { k: "ok", t: "Second open of the same card: the picture flies properly." },
+      { k: "fixed", t: "First open of each card: the thumbnail's own picture now flies into the card (instead of an empty grey box), and the big photo takes over when it arrives." },
+      { k: "ok", t: "Second open of the same card: the picture flies as before." },
+      { k: "known", t: "The neighbouring cards' photos are still downloading too, so their picture areas stay plain grey for a moment." },
     ],
   },
   {
     id: "hscroll",
     title: "7. Content inside a card that scrolls sideways",
-    what: "The detail cards contain a photo strip and a wide table, each meant to scroll sideways on its own. Open a card, scroll down a little to them, and try to scroll them sideways (two-finger sideways swipe on a trackpad, or Shift + mouse wheel).",
+    what: "The detail cards contain a photo strip and a wide table, each meant to scroll sideways on its own. Open a card, scroll down a little to them, and scroll them sideways (two-finger sideways swipe on a trackpad, or Shift + mouse wheel).",
     checks: [
-      { k: "bug", t: "The strip and the table don't scroll sideways; the swipe switches to the next walk instead." },
+      { k: "fixed", t: "The strip and the table now scroll sideways; the card stays put." },
+      { k: "ok", t: "A sideways swipe elsewhere on the card (over the text) still moves to the next walk." },
+      { k: "look", t: "When the strip reaches its end mid-swipe, the rest of that swipe doesn't turn the page; a new swipe does. Does that feel right?" },
     ],
   },
   {
     id: "big",
     title: "8. A large gallery (48 walks)",
-    what: "Opening any card also builds the cards for every walk in the group, so the first moment of the zoom does more work the bigger the gallery. Watch the “slowest frame” number in the status bar (17 ms is perfectly smooth; over about 50 ms is a visible hitch). On a fast computer it may look fine; on a mid-range phone it hitches.",
+    what: "Opening now builds only the card you opened and its two neighbours; the rest are built after the zoom lands, while nothing moves. Watch the “slowest frame” number in the status bar (17 ms is perfectly smooth; over about 50 ms is a visible hitch).",
     checks: [
-      { k: "look", t: "Note the “slowest frame” number after opening a card here, and compare it with scenario 1 (9 walks)." },
-      { k: "look", t: "The picture hesitates for a moment before it starts to move (compare with scenario 1)." },
+      { k: "fixed", t: "The picture starts moving as promptly here as in scenario 1 (9 walks), with no hesitation." },
+      { k: "look", t: "Note the “slowest frame” number after opening a card here, and after closing one." },
     ],
   },
   {
     id: "dupe",
     title: "9. The same walk shown twice (featured + grid)",
-    what: "The walk at the top (“Tea Terraces”, shown big as a featured item) also appears in the grid below. Click the big featured picture.",
+    what: "The walk at the top (“Tea Terraces”, shown big as a featured item) also appears in the grid below. Click the big featured picture, then close it; then try the copy in the grid.",
     checks: [
-      { k: "bug", t: "The zoom does not start from the picture you clicked: the featured picture stays where it is, and the flying picture comes from the grid copy lower down (from below the bottom of the window)." },
+      { k: "fixed", t: "The zoom starts from the picture you clicked (the big featured one), and closing lands back on it." },
+      { k: "ok", t: "Clicking the grid copy zooms from, and back to, the grid copy." },
+    ],
+  },
+  {
+    id: "throw",
+    title: "10. One item whose content is broken",
+    what: "Walk 5 (“Tea Terraces”) has a bug in its detail content, as can happen with real content. Open walk 4, then press → to reach walk 5.",
+    checks: [
+      { k: "fixed", t: "Walk 5's card shows “This item couldn’t be shown.”; before, the whole page went blank. The other walks, and closing, keep working." },
+      { k: "look", t: "The message's look is the library's plain default. Is it acceptable, or should it be designed?" },
     ],
   },
 ];
 
 const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
-const LABEL = { ok: "Should work", bug: "Problem I found", look: "Your judgement" };
+const LABEL = { ok: "Should work", fixed: "Fixed: confirm", known: "Still a limitation", look: "Your judgement" };
 
 export function makeDemo(js) {
   const sections = SCENARIOS.map(
@@ -140,10 +159,10 @@ export function makeDemo(js) {
 <style>
 :root {
   --bg: #f4f2ee; --surface: #fff; --ink: #1d1e22; --muted: #5d6068; --line: #dedad2;
-  --accent: #2f5d50; --ok: #2f7a4f; --bug: #b3412e; --look: #6a55a8;
+  --accent: #2f5d50; --ok: #2f7a4f; --fixed: #1f6f8b; --known: #a2591d; --look: #6a55a8;
 }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) { --bg: #16171a; --surface: #202227; --ink: #ecebe8; --muted: #a3a6ad; --line: #34363c; --accent: #8cc4b1; --ok: #79c99a; --bug: #f08f7c; --look: #b7a6ee; }
+  :root:not([data-theme="light"]) { --bg: #16171a; --surface: #202227; --ink: #ecebe8; --muted: #a3a6ad; --line: #34363c; --accent: #8cc4b1; --ok: #79c99a; --fixed: #7cc7e4; --known: #f0b27c; --look: #b7a6ee; }
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
@@ -174,7 +193,7 @@ button.primary { background: var(--accent); color: var(--bg); border-color: var(
 .check:first-child { border-top: 0; }
 .check-text { margin-bottom: 6px; }
 .tag { display: inline-block; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 1px 7px; border-radius: 999px; margin-right: 4px; vertical-align: 1px; color: var(--surface); }
-.tag-ok { background: var(--ok); } .tag-bug { background: var(--bug); } .tag-look { background: var(--look); }
+.tag-ok { background: var(--ok); } .tag-fixed { background: var(--fixed); } .tag-known { background: var(--known); } .tag-look { background: var(--look); }
 .answers { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 0.9rem; }
 .answers label { display: inline-flex; gap: 4px; align-items: center; cursor: pointer; }
 .note { flex: 1 1 220px; min-width: 0; font: inherit; font-size: 0.88rem; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); }
@@ -195,13 +214,13 @@ button.primary { background: var(--accent); color: var(--bg); border-color: var(
 <div class="top"><div class="wrap">
   <h1>Zoom library demo</h1>
   <label>Speed <select id="speed"><option value="1">Normal</option><option value="0.3">Slow motion (×0.3)</option><option value="0.1">Very slow (×0.1)</option></select></label>
-  <label>Page turn <select id="pageTiming"><option value="">Library default (0.5 s)</option><option value="0.35">0.35 s, no bounce</option><option value="0.3b">0.3 s, slight bounce</option></select></label>
+  <label>Page turn <select id="pageTiming"><option value="">Library default (0.25 s, no bounce)</option><option value="0.35">0.35 s, no bounce</option><option value="0.5">0.5 s (the old default)</option></select></label>
   <nav>${SCENARIOS.map((s) => `<a href="#s-${s.id}">${s.title.split(". ")[0]}</a>`).join("")}<a href="#help">Reduced motion help</a><a href="#results">Results</a></nav>
 </div></div>
 <div class="wrap">
   <div class="intro">
     <h2>See the zoom transitions for yourself</h2>
-    <p>Each box below is a small, separate website running the library exactly as it is in the repository (nothing changed). Under each one is a checklist. Items marked <span class="tag tag-ok">Should work</span> are things I measured as correct; please confirm they look right to you. <span class="tag tag-bug">Problem I found</span> items are issues from my report; please confirm you can see them. <span class="tag tag-look">Your judgement</span> items need a designer's eye.</p>
+    <p>Each box below is a small, separate website running the library as it is now in the repository, with the fixes from the review. Under each one is a checklist. <span class="tag tag-fixed">Fixed: confirm</span> items were problems in the report; please confirm they're gone. <span class="tag tag-ok">Should work</span> items were already right; please confirm they still are. <span class="tag tag-known">Still a limitation</span> items remain, so you know what to expect. <span class="tag tag-look">Your judgement</span> items need a designer's eye.</p>
     <p>When you're done, press <b>Copy results</b> at the bottom and paste the text back to me. Your answers are kept if you reload this page in the same browser. The dark bar at the bottom of each frame is a diagnostic I added (it's not part of the library): it shows whether anything was left behind after a transition, the slowest frame, and where keyboard focus is.</p>
   </div>
 ${sections}
@@ -234,7 +253,7 @@ const REDUCED_STUB = "(function(){var m=window.matchMedia.bind(window);window.ma
 const speedEl = document.getElementById("speed");
 const pageEl = document.getElementById("pageTiming");
 // Passed to the provider as its timing.page prop (a public option; the library itself is unchanged).
-const PAGE_TIMINGS = { "0.35": { duration: 0.35, bounce: 0 }, "0.3b": { duration: 0.3, bounce: 0.1 } };
+const PAGE_TIMINGS = { "0.35": { duration: 0.35, bounce: 0 }, "0.5": { duration: 0.5, bounce: 0 } };
 function stageHtml(id, reduced) {
   const cfg = { scenario: id, timeScale: +speedEl.value, simulatedReduced: reduced };
   const pt = PAGE_TIMINGS[pageEl.value];
@@ -259,7 +278,7 @@ document.addEventListener("click", (e) => {
 });
 
 // Checklist: kept in this browser between reloads (if storage is available), and written out as text.
-const KEY = "zoom-demo-results-v1";
+const KEY = "zoom-demo-results-v2";
 let saved = {};
 try { saved = JSON.parse(localStorage.getItem(KEY) || "{}"); } catch (e) {}
 document.querySelectorAll(".check").forEach((li) => {
@@ -285,7 +304,7 @@ function render() {
     lines.push(s.title);
     s.checks.forEach((c, i) => {
       const v = d[s.id + "-" + i] || {};
-      lines.push("  " + (i + 1) + ". [" + (v.a || "not answered") + "] " + ({ ok: "(should work) ", bug: "(problem) ", look: "(judgement) " })[c.k] + c.t.slice(0, 90) + (c.t.length > 90 ? "…" : "") + (v.n ? "\\n     note: " + v.n : ""));
+      lines.push("  " + (i + 1) + ". [" + (v.a || "not answered") + "] " + ({ ok: "(should work) ", fixed: "(fixed?) ", known: "(limitation) ", look: "(judgement) " })[c.k] + c.t.slice(0, 90) + (c.t.length > 90 ? "…" : "") + (v.n ? "\\n     note: " + v.n : ""));
     });
     lines.push("");
   });

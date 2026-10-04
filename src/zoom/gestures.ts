@@ -4,7 +4,6 @@ import { REST, clamp, project, rubber, springTo } from "./springs";
 export type GestureLayout = {
   W: number;
   H: number;
-  side: number;
   step: number;
   top: number;
   cardH: number;
@@ -129,6 +128,41 @@ export function attachGestures(root: HTMLElement, c: GestureController) {
     stopGlide();
     sc.scrollTop += dy;
   };
+  /**
+   * Whether something under `target` inside the card (a photo strip, a wide table, a code sample)
+   * can still scroll sideways by `delta` px (positive: towards its right end). Such content
+   * scrolls first; a sideways swipe only pages or closes once it has reached its end.
+   */
+  const canScrollX = (target: EventTarget | null, delta: number) => {
+    for (let el = target instanceof Element ? target : null; el && el !== root; el = el.parentElement) {
+      if (!(el instanceof HTMLElement) || el.scrollWidth <= el.clientWidth + 1) continue;
+      const ox = getComputedStyle(el).overflowX;
+      if (ox !== "auto" && ox !== "scroll") continue;
+      // Right-to-left content counts scrollLeft down from 0.
+      const rtl = getComputedStyle(el).direction === "rtl";
+      const max = el.scrollWidth - el.clientWidth;
+      const at = rtl ? max + el.scrollLeft : el.scrollLeft;
+      if (delta > 0 ? at < max - 1 : at > 1) return true;
+    }
+    return false;
+  };
+  /** When a sideways wheel swipe last scrolled content inside the card (the rest of that swipe stays with it). */
+  let innerScrollT = -Infinity;
+  /** Sideways wheel event over content that scrolls sideways: true if it's the content's (let it scroll). */
+  const innerSideways = (e: WheelEvent, dx: number, now: number) => {
+    if (canScrollX(e.target, dx)) {
+      innerScrollT = now;
+      return true;
+    }
+    if (now - innerScrollT < QUIET_MS) {
+      // The content reached its end mid-swipe: the rest of this swipe mustn't turn the page.
+      innerScrollT = now;
+      e.preventDefault();
+      return true;
+    }
+    return false;
+  };
+
   /** True when an event landed somewhere other than the visible card (a neighbour, a gap, the backdrop). */
   const offCard = (target: EventTarget | null) => {
     const card = c.activeCard();
@@ -205,6 +239,11 @@ export function attachGestures(root: HTMLElement, c: GestureController) {
         G.startTrack = c.track.get();
         c.track.jump(G.startTrack); // grab a settling page where it is
       };
+      // Sideways over content that scrolls sideways: the content's, natively.
+      if (sideways && canScrollX(G.target, -dx)) {
+        G.axis = "none";
+        return false;
+      }
       const startDismiss = (dir: 1 | -1) => {
         G.axis = "dismiss";
         G.dir = dir;
@@ -609,10 +648,11 @@ export function attachGestures(root: HTMLElement, c: GestureController) {
   // Vertical pager: scrolling sideways pulls the card to close, either way. There's
   // nothing to scroll sideways, so there's no edge to wait for: the pull starts at once.
   const onSidewaysWheel = (e: WheelEvent) => {
-    // Always ours, so a sideways swipe never reaches the browser's swipe-back navigation.
+    const dx = wheelDelta(e, "x");
+    if (dx && !W.pulling && innerSideways(e, dx, performance.now())) return;
+    // Otherwise always ours, so a sideways swipe never reaches the browser's swipe-back navigation.
     e.preventDefault();
     if (!sidewaysOn(c.dismiss().wheel)) return;
-    const dx = wheelDelta(e, "x");
     if (!dx) return;
     if (!W.pulling) beginPull(dx < 0 ? 1 : -1);
     pullBy(dx);
@@ -645,9 +685,12 @@ export function attachGestures(root: HTMLElement, c: GestureController) {
   };
   // Horizontal pager: sideways swipes page.
   const onHorizontalWheel = (e: WheelEvent) => {
-    e.preventDefault();
     const now = performance.now();
     const dx = wheelDelta(e, "x");
+    // (Unless it's the rest of a swipe that just turned the page: that stays with the pager.)
+    const tailLive = pageTail.active && now - pageLastT <= QUIET_MS;
+    if (dx && !tailLive && innerSideways(e, dx, now)) return;
+    e.preventDefault();
     pageClock(now);
     if (!dx || pageTail.owns(dx, now)) return;
     pageBy(dx);

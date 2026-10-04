@@ -51,12 +51,16 @@ export type HeroMetrics = {
 /** Far enough outside the copy's box that nothing a hero paints reaches it. */
 const OUTSIDE = 10000;
 
-/** Read everything a flight needs from the hero, in one go, before anything is written. */
-export function measureHero(hero: HTMLElement): HeroMetrics {
+/**
+ * Read everything a flight needs from the hero, in one go, before anything is written.
+ * standInAspect: the shape of the source's picture, used while the hero's own image is still
+ * downloading (its shape isn't known yet, and the source's picture flies in its place).
+ */
+export function measureHero(hero: HTMLElement, standInAspect: number | null = null): HeroMetrics {
   const cs = getComputedStyle(hero);
   const W0 = hero.offsetWidth;
   const H0 = hero.offsetHeight;
-  const a = mediaAspect(hero);
+  const a = mediaAspect(hero, standInAspect);
   const fill = a && W0 >= 1 && H0 >= 1 && Math.abs(a - W0 / H0) > 0.01 ? (a > W0 / H0 ? { W: H0 * a, H: H0 } : { W: W0, H: W0 / a }) : null;
   return { W0, H0, fill, radius: readCorners(hero), shadow: cs.boxShadow, shadowRadius: cs.borderRadius };
 }
@@ -70,19 +74,51 @@ function heroMedia(hero: HTMLElement) {
   return media.length === 1 ? media[0] : null;
 }
 /** The shape (width / height) of a hero's whole picture, when it's a single image cropped to cover its box. */
-function mediaAspect(hero: HTMLElement): number | null {
+function mediaAspect(hero: HTMLElement, standInAspect: number | null): number | null {
   const m = heroMedia(hero);
   if (!m) return null;
   if (m instanceof HTMLImageElement || m instanceof HTMLVideoElement) {
     const w = m instanceof HTMLImageElement ? m.naturalWidth : m.videoWidth;
     const h = m instanceof HTMLImageElement ? m.naturalHeight : m.videoHeight;
-    return w && h && getComputedStyle(m).objectFit === "cover" ? w / h : null;
+    if (getComputedStyle(m).objectFit !== "cover") return null;
+    return w && h ? w / h : standInAspect;
   }
   if (m instanceof SVGSVGElement) {
     const vb = m.viewBox.baseVal;
     return vb && vb.width && vb.height && m.preserveAspectRatio.baseVal.meetOrSlice === SVGPreserveAspectRatio.SVG_MEETORSLICE_SLICE
       ? vb.width / vb.height
       : null;
+  }
+  return null;
+}
+
+/** An image that has arrived and can be drawn. */
+const loaded = (img: HTMLImageElement) => img.complete && img.naturalWidth > 0;
+
+/** The hero's single image, if it hasn't downloaded yet. */
+function pendingImage(hero: HTMLElement) {
+  const m = heroMedia(hero);
+  return m instanceof HTMLImageElement && !loaded(m) ? m : null;
+}
+
+/**
+ * The picture a source shows, when it's a single image that has arrived: its address and shape.
+ * It stands in for a hero image that is still downloading (the detail photo is usually a
+ * different, bigger file that only starts loading when the card opens), so the picture that
+ * flies is the one the visitor tapped rather than an empty box.
+ */
+export function sourcePicture(el: HTMLElement): { src: string; aspect: number } | null {
+  const m = heroMedia(el);
+  if (m instanceof HTMLImageElement) {
+    return loaded(m) ? { src: m.currentSrc || m.src, aspect: m.naturalWidth / m.naturalHeight } : null;
+  }
+  if (m instanceof SVGSVGElement) {
+    const vb = m.viewBox.baseVal;
+    const w = vb?.width || m.width.baseVal.value;
+    const h = vb?.height || m.height.baseVal.value;
+    if (!w || !h) return null;
+    const svg = new XMLSerializer().serializeToString(m);
+    return { src: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`, aspect: w / h };
   }
   return null;
 }
@@ -101,15 +137,17 @@ export const canFly = (m: HeroMetrics) => m.W0 >= 1 && m.H0 >= 1;
  * otherwise be lost. Freezing is expensive, so it's cached per hero and can be
  * prepared ahead of time with prepareSnapshot().
  */
-const frozenCache = new WeakMap<HTMLElement, { node: HTMLElement; w: number; h: number }>();
+const frozenCache = new WeakMap<HTMLElement, { node: HTMLElement; w: number; h: number; srcs: string }>();
 export function prepareSnapshot(hero: HTMLElement) {
   const w = hero.offsetWidth;
   const h = hero.offsetHeight;
+  // An image that changed (or arrived) since the copy was made makes it stale.
+  const srcs = Array.from(hero.querySelectorAll("img"), (i) => i.currentSrc || i.src).join("|");
   const cached = frozenCache.get(hero);
-  if (cached && cached.w === w && cached.h === h) return cached.node;
+  if (cached && cached.w === w && cached.h === h && cached.srcs === srcs) return cached.node;
   const node = hero.cloneNode(true) as HTMLElement;
   freezeStyles(hero, node);
-  frozenCache.set(hero, { node, w, h });
+  frozenCache.set(hero, { node, w, h, srcs });
   return node;
 }
 export function snapshotOf(hero: HTMLElement, live: boolean) {
@@ -142,6 +180,8 @@ export function createFlight(
      * pops on at take-off and off at landing; this fades it with the flight instead.
      */
     shadowOpacity?: () => number;
+    /** The source's picture, flown in place of a hero image that hasn't downloaded yet. */
+    standIn?: { src: string } | null;
   } = {},
 ): Flight {
   const m = opts.metrics ?? measureHero(hero);
@@ -186,6 +226,25 @@ export function createFlight(
     copy.style.boxShadow = "none";
   }
   el.appendChild(copy);
+  // The hero's image is still downloading: the copy shows the source's picture instead, and
+  // switches to the hero's own once it arrives.
+  const pending = pendingImage(hero);
+  const copyImg = pending ? heroMedia(copy) : null;
+  let offPending = () => {};
+  if (pending && copyImg instanceof HTMLImageElement) {
+    if (opts.standIn) {
+      copyImg.removeAttribute("srcset");
+      copyImg.removeAttribute("sizes");
+      copyImg.src = opts.standIn.src;
+    }
+    const arrived = () => {
+      if (!loaded(pending)) return;
+      copyImg.removeAttribute("srcset");
+      copyImg.src = pending.currentSrc || pending.src;
+    };
+    pending.addEventListener("load", arrived);
+    offPending = () => pending.removeEventListener("load", arrived);
+  }
   // Live heroes get a host for their own React content. Until that content has
   // rendered (usually the same frame), the snapshot underneath stands in.
   let liveHost: HTMLElement | null = null;
@@ -254,6 +313,7 @@ export function createFlight(
     frame.render(write);
   };
   const unsubscribe = [cx, cy, s].map((v) => v.on("change", schedule));
+  let offLive = () => {};
   write();
 
   const flight: Flight = {
@@ -263,7 +323,24 @@ export function createFlight(
     to: B,
     liveHost,
     dropSnapshot() {
-      copy.remove();
+      // The live content's image may still be downloading: keep the copy (showing the source's
+      // picture) in front until it has arrived, rather than flying an empty box.
+      const live = liveHost && heroMedia(liveHost);
+      if (!(live instanceof HTMLImageElement) || loaded(live)) {
+        copy.remove();
+        return;
+      }
+      const host = liveHost!;
+      host.style.visibility = "hidden";
+      const check = () => {
+        const img = heroMedia(host);
+        if (img instanceof HTMLImageElement && !loaded(img)) return;
+        host.style.visibility = "";
+        copy.remove();
+        offLive();
+      };
+      host.addEventListener("load", check, true); // load doesn't bubble, but capturing sees it
+      offLive = () => host.removeEventListener("load", check, true);
     },
     invalidate: () => schedule(),
     visible() {
@@ -285,6 +362,8 @@ export function createFlight(
       flight.to = B;
     },
     destroy() {
+      offPending();
+      offLive();
       unsubscribe.forEach((u) => u());
       cancelFrame(write);
       [cx, cy, s].forEach((v) => v.stop());

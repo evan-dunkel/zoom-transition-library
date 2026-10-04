@@ -8,23 +8,21 @@ export type ZoomTiming = {
   open: SpringSpec;
   /** Cards shrinking back into their sources. */
   close: SpringSpec;
-  /** Settling onto a page after a swipe or arrow key. */
+  /** Settling onto a page after a swipe or arrow key. Default 0.25 s, no bounce. */
   page: SpringSpec;
   /** Snapping back when a dismiss drag is let go early. */
   cancel: SpringSpec;
   /** Fades: a card with no source to return to, and the group's dimming swapping over while open. */
   fade: SpringSpec;
-  /** Unused since reduced motion became instant (no fade). Kept so existing timing props still type-check. */
-  fadeOut: SpringSpec;
 };
 
 export const defaultTiming: ZoomTiming = {
   open: { duration: 0.5, bounce: 0.15 },
   close: { duration: 0.5 / 1.75, bounce: 0.15 }, // 1.75× faster than open
-  page: { duration: 0.5, bounce: 0 }, // SwiftUI .smooth
+  // Short and without bounce: a longer spring spends most of its time creeping the last few pixels.
+  page: { duration: 0.25, bounce: 0 },
   cancel: { duration: 0.5, bounce: 0.15 },
   fade: { duration: 0.35, bounce: 0 },
-  fadeOut: { duration: 0.35 / 1.75, bounce: 0 },
 };
 
 const TAU = Math.PI * 2;
@@ -74,7 +72,11 @@ export function springTo(
     return Promise.resolve();
   }
   const restDelta = opts.restDelta ?? REST.px;
-  const velocity = opts.velocity !== undefined && Number.isFinite(opts.velocity) ? opts.velocity : undefined;
+  const speed = opts.speed ?? 1;
+  // Velocities are measured in real time, but the spring runs on its own clock, slowed or sped
+  // up by `speed`. Convert, or a turn-around in slow motion starts almost from rest (it stopped dead).
+  const velocity =
+    opts.velocity !== undefined && Number.isFinite(opts.velocity) ? opts.velocity / Math.max(speed, 0.01) : undefined;
   const controls = animate(value, to, {
     type: "spring",
     ...springPhysics(spec),
@@ -82,7 +84,6 @@ export function springTo(
     restSpeed: restDelta * 12,
     ...(velocity === undefined ? {} : { velocity }),
   });
-  const speed = opts.speed ?? 1;
   if (speed !== 1) controls.speed = speed;
   const token = {};
   latestSpring.set(value, token);

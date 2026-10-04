@@ -1,18 +1,14 @@
 // Builds the independent review's demo and probe pages from demo-src/ and the library in src/zoom.
 //   node review/independent-review/build.mjs
 // Writes dist/app.js + dist/probe.html (used by probes/) and zoom-demo.html (the double-click demo).
-// Uses the packages installed in review/harness (npm --prefix review/harness install). Don't
-// also install the root package.json: two copies of React end up in the bundle and nothing renders.
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+// Uses the packages installed in review/harness (npm --prefix review/harness install).
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const harness = join(here, "..", "harness");
-if (existsSync(join(here, "..", "..", "node_modules", "react"))) {
-  console.warn("warning: a root node_modules/react exists; the bundle may contain two Reacts. Remove the root node_modules.");
-}
 const { build } = createRequire(join(harness, "package.json"))("esbuild");
 mkdirSync(join(here, "dist"), { recursive: true });
 
@@ -28,6 +24,14 @@ await build({
   nodePaths: [join(harness, "node_modules")],
   outfile: join(here, "dist/app.js"),
   legalComments: "none",
+  // One copy of React and Motion, from review/harness, even if the root has its own node_modules.
+  plugins: [{
+    name: "single-copy",
+    setup(b) {
+      b.onResolve({ filter: /^(react|react-dom|motion|scheduler)(\/|$)/ }, (args) =>
+        args.pluginData?.singleCopy ? undefined : b.resolve(args.path, { kind: args.kind, resolveDir: harness, pluginData: { singleCopy: true } }));
+    },
+  }],
 });
 const js = readFileSync(join(here, "dist/app.js"), "utf8");
 

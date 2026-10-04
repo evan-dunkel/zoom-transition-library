@@ -11,7 +11,8 @@
   overflow: hidden;
   visibility: hidden;
   pointer-events: none;
-  touch-action: pan-y;
+  /* Sideways drags are the pager's (handled in script); vertical scrolling and pinch-zoom stay the browser's. */
+  touch-action: pan-y pinch-zoom;
 }
 /* Text in an open card stays selectable; only a touch drag in progress turns selection off. */
 .zoom-dragging { -webkit-user-select: none; user-select: none; }
@@ -37,6 +38,8 @@
   transform-origin: 0 0;
   overflow: hidden;
 }
+/* The card takes focus itself when it has no close button; it's a container, not a control. */
+.zoom-card:focus { outline: none; }
 .zoom-card-scroll {
   height: 100%;
   overflow-y: auto;

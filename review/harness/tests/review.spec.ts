@@ -442,14 +442,8 @@ test.describe("touch", () => {
   });
 });
 
+// Deep links (#id addresses) now open their card: see fixes.spec.ts.
 test.describe("known limitations (expected to fail)", () => {
-  test("a shared or reloaded #id link reopens that card (needs real pages per item instead; see report)", async ({ page }) => {
-    test.fail();
-    await page.goto(url({ scenario: "rapid" }) + "#rapid-3");
-    await page.addScriptTag({ content: PAGE_HELPERS });
-    await expect.poll(() => phase(page), { timeout: 3000 }).toBe("open");
-  });
-
   test("TemplateDestination does not run inline event handlers from template HTML (documented: trusted markup only)", async ({ page }) => {
     test.fail();
     await page.goto(pathToFileURL(join(dist, "template.html")).href);

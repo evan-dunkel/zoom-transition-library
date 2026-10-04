@@ -10,7 +10,7 @@ import appCss from "./app.css";
 import { Art, Body, artDataUri, entries, type Entry } from "./content";
 
 type Config = {
-  scenario: "portfolio" | "grid" | "scrolled" | "mobile" | "reduced" | "rapid" | "late" | "carousel" | "keyboard" | "template";
+  scenario: "portfolio" | "grid" | "scrolled" | "mobile" | "reduced" | "rapid" | "late" | "carousel" | "keyboard" | "template" | "dupe" | "hscroll" | "throw" | "big";
   /** Test-only: late scenario loads real image URLs from here (the test delays them) instead of a timer. */
   lateUrl?: string;
   /** Test-only: fly the hero as a still snapshot (ZoomHero live={false}). */
@@ -191,6 +191,27 @@ function KeyboardDetail({ id }: { id: string }) {
       <Body entry={e} long={false} />
     </div>
   );
+}
+
+/** Detail content with a photo strip that scrolls sideways on its own. */
+function StripDetail({ id }: { id: string }) {
+  return (
+    <>
+      <Detail id={id} />
+      <div className="strip" data-strip style={{ display: "flex", gap: 8, overflowX: "auto", padding: "0 24px 24px" }}>
+        {Array.from({ length: 10 }, (_, i) => (
+          <span key={i} style={{ flex: "0 0 200px", height: 120, display: "block" }}>
+            <Art seed={i} />
+          </span>
+        ))}
+      </div>
+    </>
+  );
+}
+/** One item whose content throws while rendering. */
+function ThrowingDetail({ id }: { id: string }) {
+  if (id.endsWith("-5")) throw new Error(`destination ${id} is broken`);
+  return <Detail id={id} />;
 }
 
 /* ---------------------------------------------------------------- status bar */
@@ -455,6 +476,35 @@ function App() {
           <p className="lede">The last visible card is cut off by the edge of the row.</p>
           <Tiles items={items} group={s} variant="carousel" />
           {filler(2)}
+        </main>
+        <StatusBar />
+      </ZoomProvider>
+    );
+  }
+  if (s === "dupe") {
+    // The same walk twice: a big featured tile, and again in the grid.
+    const items = list(s, 6);
+    return (
+      <ZoomProvider {...provider(detail)}>
+        <Header />
+        <main className="page">
+          <div className="featured" style={{ maxWidth: 480 }}>
+            <Tiles items={[items[3]]} group={s} />
+          </div>
+          <Tiles items={items} group={s} />
+        </main>
+        <StatusBar />
+      </ZoomProvider>
+    );
+  }
+  if (s === "hscroll" || s === "throw" || s === "big") {
+    const items = list(s, s === "big" ? 12 : 9);
+    const render = s === "hscroll" ? (id: string) => <StripDetail id={id} /> : s === "throw" ? (id: string) => <ThrowingDetail id={id} /> : detail;
+    return (
+      <ZoomProvider {...provider(render)}>
+        <Header />
+        <main className="page">
+          <Tiles items={items} group={s} />
         </main>
         <StatusBar />
       </ZoomProvider>

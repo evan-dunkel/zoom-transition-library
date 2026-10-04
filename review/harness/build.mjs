@@ -34,6 +34,18 @@ const useOriginal = {
     });
   },
 };
+// One copy of React and Motion for the app and the library alike: resolved from this folder,
+// even when the repository root also has its own node_modules (npm install at the root
+// put a second React into the bundle, and nothing rendered).
+const singleCopy = {
+  name: "single-copy",
+  setup(b) {
+    b.onResolve({ filter: /^(react|react-dom|motion|scheduler)(\/|$)/ }, (args) => {
+      if (args.pluginData?.singleCopy) return undefined;
+      return b.resolve(args.path, { kind: args.kind, resolveDir: here, pluginData: { singleCopy: true } });
+    });
+  },
+};
 const bundle = (outfile, plugins = []) =>
   build({
     entryPoints: [join(here, "app/main.tsx")],
@@ -47,7 +59,7 @@ const bundle = (outfile, plugins = []) =>
     nodePaths: [join(here, "node_modules")],
     outfile: join(here, outfile),
     legalComments: "none",
-    plugins,
+    plugins: [singleCopy, ...plugins],
   });
 await bundle("dist/app.js");
 await bundle("dist/app-original.js", [useOriginal]);

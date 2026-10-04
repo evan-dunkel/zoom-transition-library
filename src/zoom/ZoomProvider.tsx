@@ -1,4 +1,5 @@
 import {
+  Component,
   createContext,
   memo,
   useCallback,
@@ -22,6 +23,7 @@ import {
   prepareSnapshot,
   readCorners,
   snapshotOf,
+  sourcePicture,
   type Corners,
   type Flight,
   type HeroMetrics,
@@ -195,7 +197,8 @@ export type ZoomProviderProps = {
    */
   layout?: "pager" | "stream";
   /** While open, hide every item of the group on the page (not just the visible one), so
-   *  nothing shows twice in the gaps between cards. Default true. */
+   *  nothing shows twice in the gaps between cards. They fade out as the card opens and back
+   *  as it closes. Default true; false hides only the visible item's own source. */
   hideGroupWhileOpen?: boolean;
   /**
    * While open, keep the group's other items on the page at this opacity instead of
@@ -206,13 +209,15 @@ export type ZoomProviderProps = {
   groupOpacity?: number;
   /**
    * Which cards fly back to their sources when the zoom closes.
-   * - "group" (default): every card in the group flies home to its own source.
+   * - "group" (default): every card in the group flies home to its own source (one whose
+   *   source is off screen fades where it is instead: nobody would see it fly).
    * - "visible": only the visible card does. The others stay where they are and fade
    *   out with it (and fade in with it when it opens), for a calmer close.
    */
   flyHome?: "group" | "visible";
   /** The close button on each card: true (default), false for none, or render your own.
-   *  Your element closes the card if it (or a parent) has data-zoom-close, or calls close(). */
+   *  Your element closes the card if it (or a parent) has data-zoom-close, or calls close().
+   *  Focus goes to the [data-zoom-close] element when a card opens; without one, to the card. */
   closeButton?: boolean | ((close: () => void) => ReactNode);
   /**
    * Browser history. Off by default.
@@ -220,8 +225,10 @@ export type ZoomProviderProps = {
    *   address; Back closes. For sets people flick through quickly (a photo series).
    * - mode "item": every item visited adds an entry; Back steps back through them,
    *   then closes. For items that are "places" in their own right (case studies).
-   * url gives each item's address (default "#id"). Use your real page URLs (e.g.
-   * "/writing/slug") so a reload or shared link lands on that item's own page.
+   * url gives each item's address. With the default "#id", a page loaded at an item's
+   * address (a reload, a shared link) opens that item's card at once, and closing it takes the
+   * #id off. With your own URLs (e.g. "/writing/slug"), serve a real page at each one: a reload
+   * or shared link lands there, not on this page.
    */
   history?: false | { mode: "session" | "item"; url?: (id: string) => string };
   /** Draw tuning aids: the wheel-dismiss edge zones in each card. */
@@ -298,6 +305,8 @@ type Item = {
   clipB: { p: number; e: number };
   clipE: number;
   clipOn: boolean;
+  /** The card's current clip (top, right, bottom, left, in card units), or null when it's whole. */
+  clipInset: number[] | null;
   cardRadius: Corners | null;
 };
 type Box = { x: number; y: number; w: number; h: number };
@@ -507,6 +516,21 @@ function LiveMount({ onMount, children }: { onMount: () => void; children: React
   return <>{children}</>;
 }
 
+/**
+ * Keeps one item's broken destination from taking the page down with it. The cards of the whole
+ * group are rendered while open, so without this, an error in any one item blanked the site
+ * whichever item was opened. React still reports the error in the console.
+ */
+class DestinationBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  render() {
+    return this.state.failed ? <p className="zoom-error">This item couldn’t be shown.</p> : this.props.children;
+  }
+}
+
 function CloseButton({ option, label, close }: { option: ZoomProviderProps["closeButton"]; label: string; close: () => void }) {
   if (option === false) return null;
   if (typeof option === "function") return <>{option(close)}</>;
@@ -570,6 +594,7 @@ const ZoomCard = memo(function ZoomCard({
       className="zoom-card"
       data-zoom-id={id}
       aria-label={label}
+      tabIndex={-1}
       inert={!active && !layout.stream}
       style={{
         // In a stream, cards sit in the column's own flow at their content's height.
@@ -596,7 +621,7 @@ const ZoomCard = memo(function ZoomCard({
               <div className="zoom-close-bar">
                 <CloseButton option={closeButton} label={closeLabel} close={close} />
               </div>
-              {renderDestination(id)}
+              <DestinationBoundary>{renderDestination(id)}</DestinationBoundary>
               {zones && <EdgeZones slop={zones.slop} edges={zones.edges} />}
             </div>
           </div>
@@ -613,7 +638,10 @@ export function ZoomProvider(props: ZoomProviderProps) {
   const reduceRef = useRef(reduce);
   reduceRef.current = reduce;
 
+  /** The source each id opens from and returns to. */
   const sources = useRef(new Map<string, SourceEntry>());
+  /** Every source registered for each id (the same item can be on the page twice). */
+  const allSources = useRef(new Map<string, SourceEntry[]>());
   const heroes = useRef(new Map<string, HTMLElement>());
   const heroContent = useRef(new Map<string, HeroContent>());
   const liveFlights = useRef<LiveFlightsHandle | null>(null);
@@ -631,6 +659,8 @@ export function ZoomProvider(props: ZoomProviderProps) {
   const [index, setIndexState] = useState(0);
   const [layout, setLayout] = useState<Layout | null>(null);
   const [announce, setAnnounce] = useState("");
+  /** Re-renders once more cards have been filled in (see S.ready). */
+  const [, setReadyTick] = useState(0);
 
   // Mutable state the animations read every frame; kept out of React on purpose.
   const S = useRef({
@@ -672,10 +702,30 @@ export function ZoomProvider(props: ZoomProviderProps) {
     /** The per-frame card clip loop is running. */
     clipLoop: false,
     /** The visible card's close button and its place in the card (card units), for closeButtonTiming "flight" (the default). */
-    closeOff: null as { el: HTMLElement; x: number; y: number } | null,
+    closeOff: null as { el: HTMLElement; x: number; y: number; w: number; h: number } | null,
     /** The last kind of input on the page, and whether this session was opened by pointer. */
     input: "keyboard" as "keyboard" | "pointer",
     pointerOpened: false,
+    /** Where the last pointer press landed, to tell which copy of a twice-shown item was clicked. */
+    lastPointer: null as EventTarget | null,
+    /** What had focus when the card was opened (focus may be moved back from there). */
+    opener: null as Element | null,
+    /** Opening from the page's own #id address on load: instant, and with no history entry of its own. */
+    deepLink: false,
+    /** This session began from the page's #id address: closing takes the #id off it. */
+    deepLinked: false,
+    /** The deep-linked card is opening (instantly); motion goes back to normal once it's open. */
+    deepLinkOpening: false,
+    /** Strip the #id once our own pending history.go() has landed. */
+    stripAfterPop: false,
+    /** The part of each source not covered by a fixed or sticky header (root coordinates), when something covers it. */
+    bands: new Map<string, { top: number; bottom: number }>(),
+    /**
+     * Cards rendered this session (pager layouts). Opening renders only the visible card and its
+     * neighbours, so the tap starts moving at once however big the group is; the rest are added
+     * after landing, a few at a time while nothing moves.
+     */
+    ready: new Set<string>(),
   }).current;
 
   // The shared zoom: the whole pager (card, metadata, neighbours) scales together.
@@ -741,6 +791,7 @@ export function ZoomProvider(props: ZoomProviderProps) {
         clipB: { p: 1, e: 1 },
         clipE: 1,
         clipOn: false,
+        clipInset: null,
         cardRadius: null,
       };
       items.current.set(id, it);
@@ -830,7 +881,7 @@ export function ZoomProvider(props: ZoomProviderProps) {
    */
   const recordPage = (id: string, replace = false) => {
     const h = historyOption();
-    if (!h || S.fromPop || S.histDepth === 0) return;
+    if (!h || S.fromPop || (S.histDepth === 0 && !S.deepLinked)) return;
     if (h.mode === "item" && !replace) {
       if (writeHistory(true, id, S.histDepth + 1)) S.histDepth += 1;
     } else {
@@ -841,6 +892,8 @@ export function ZoomProvider(props: ZoomProviderProps) {
   const leaveHistory = () => {
     S.pendingPush = null;
     if (!historyOption()) return;
+    const strip = S.deepLinked;
+    S.deepLinked = false;
     if (S.fromPop) {
       S.histDepth = 0;
       return;
@@ -849,7 +902,16 @@ export function ZoomProvider(props: ZoomProviderProps) {
       const n = S.histDepth;
       S.histDepth = 0;
       S.ignorePops += 1;
+      S.stripAfterPop = strip;
       window.history.go(-n);
+    } else if (strip) stripHash();
+  };
+  /** The session began at the page's own #id address: back to the page's plain address. */
+  const stripHash = () => {
+    try {
+      window.history.replaceState(null, "", location.pathname + location.search);
+    } catch {
+      // Sandboxed frames refuse; the #id simply stays.
     }
   };
 
@@ -857,6 +919,25 @@ export function ZoomProvider(props: ZoomProviderProps) {
     S.phase = p;
     phaseMV.set(p);
     if (rootRef.current) rootRef.current.dataset.phase = p;
+  };
+
+  /**
+   * Whether the library may move focus now. Only from where it left it: nothing, the overlay, or
+   * whatever opened the card. Never from something the visitor has chosen since (a search box
+   * clicked while a card flew home), and never into this frame from another one.
+   */
+  const mayMoveFocus = () => {
+    if (window.top !== window && !document.hasFocus()) return false;
+    const a = document.activeElement;
+    if (!a || a === document.body || a === document.documentElement) return true;
+    if (rootRef.current?.contains(a)) return true;
+    return !!S.opener && (a === S.opener || S.opener.contains(a));
+  };
+  /** Focus the visible card: its close button, or the card itself when it has none. */
+  const focusCard = (id: string) => {
+    const card = cardEls.current.get(id);
+    if (!card || !mayMoveFocus()) return;
+    (card.querySelector<HTMLElement>("[data-zoom-close]") ?? card).focus({ preventScroll: true });
   };
 
   const computeLayout = (): Layout => {
@@ -949,8 +1030,10 @@ export function ZoomProvider(props: ZoomProviderProps) {
   // Progress is the card's on-screen scale between "sitting on its source" (0) and
   // full size (1). Measured on the card rather than the flight, so it's identical
   // across the hand-over from the shared zoom to per-card motion: no jumps.
+  // A card with no source to land on (cards mode) fades instead, so its opacity is its progress.
   const progressOf = (it: Item) => {
     if (S.reduced) return 1;
+    if (S.mode === "cards" && !Number.isFinite(it.sLand)) return it.cv.o.get();
     const scale = S.mode === "zoom" ? zs.get() * it.cv.s.get() : it.cv.s.get();
     const sLand = Number.isFinite(it.sLand) ? it.sLand : S.s0;
     if (sLand >= 1) return it.cv.o.get();
@@ -975,10 +1058,11 @@ export function ZoomProvider(props: ZoomProviderProps) {
 
   const isLive = (id: string) => !!heroContent.current.get(id)?.live;
   /** Everything a flight needs from the DOM, read before anything is written. */
-  const prepareFlight = (id: string, hero: HTMLElement) => ({
-    metrics: measureHero(hero),
-    snapshot: snapshotOf(hero, isLive(id)),
-  });
+  // The source's picture stands in for a hero image that hasn't downloaded yet.
+  const prepareFlight = (id: string, hero: HTMLElement, source: HTMLElement | null | undefined) => {
+    const standIn = source ? sourcePicture(source) : null;
+    return { metrics: measureHero(hero, standIn?.aspect ?? null), snapshot: snapshotOf(hero, isLive(id)), standIn };
+  };
   /**
    * The hero's corner radii as seen in its card, at the card's full size. Where the hero
    * reaches a corner of the card (an edge-to-edge image at the top), the card's rounded
@@ -1002,6 +1086,58 @@ export function ZoomProvider(props: ZoomProviderProps) {
     ];
   };
   const scaleCorners = (r: Corners, k: number) => r.map((v) => v * k) as Corners;
+
+  /**
+   * The part of the screen a flight and its card are kept to near the source: a fixed or sticky
+   * header (or footer) that covers part of the source would otherwise be drawn over at take-off and
+   * landing. It opens out to the whole screen over the first third of the way to the card.
+   */
+  const coverBand = (it: Item) => {
+    const b = S.bands.get(it.id);
+    if (!b || !S.L) return null;
+    const e = clamp(progressOf(it) / 0.35, 0, 1);
+    if (e >= 1) return null;
+    return { top: b.top * (1 - e), bottom: b.bottom + (S.L.H - b.bottom) * e };
+  };
+  /** Measures what covers each source on screen (call before anything is hidden or shown over them). */
+  const measureBands = (ids: string[]) => {
+    S.bands.clear();
+    const root = rootRef.current;
+    if (!root) return;
+    const rb = root.getBoundingClientRect();
+    for (const id of ids) {
+      const el = sources.current.get(id)?.el;
+      if (!el?.isConnected) continue;
+      const r = el.getBoundingClientRect();
+      const top = Math.max(r.top, 0);
+      const bottom = Math.min(r.bottom, window.innerHeight);
+      if (bottom - top < 2 || r.right < 0 || r.left > window.innerWidth) continue;
+      const x = clamp(r.left + r.width / 2, 0, window.innerWidth - 1);
+      // Whether the source is what's on top at height y (or something inside it, or around it).
+      // The overlay itself doesn't count: it may be open over the page right now.
+      const own = (y: number) => {
+        const hit = document.elementsFromPoint(x, y).find((e) => !root.contains(e));
+        return !hit || el.contains(hit) || hit.contains(el);
+      };
+      // Covered from the top down to t, and from b to the bottom; find both edges by halving.
+      const edge = (from: number, to: number) => {
+        if (own(from)) return from;
+        if (!own(to)) return null;
+        let a = from;
+        let z = to;
+        while (Math.abs(z - a) > 1) {
+          const m = (a + z) / 2;
+          if (own(m)) z = m;
+          else a = m;
+        }
+        return z;
+      };
+      const t = edge(top + 0.5, (top + bottom) / 2);
+      const b = edge(bottom - 0.5, (top + bottom) / 2);
+      if (t === null || b === null || (t <= top + 0.5 && b >= bottom - 0.5)) continue;
+      S.bands.set(id, { top: t - rb.top, bottom: b - rb.top });
+    }
+  };
 
   const liveKey = useRef(0);
   /** The card's scroller, for following content scrolled while the hero is in flight. */
@@ -1027,6 +1163,7 @@ export function ZoomProvider(props: ZoomProviderProps) {
       live: live ? { className: content!.className } : undefined,
       metrics: pre.metrics,
       snapshot: pre.snapshot,
+      standIn: pre.standIn,
       // Heading into the card: if its content is scrolled mid-flight, the hero's
       // landing spot moves with it, so the flight follows 1:1 (at the card's
       // current scale) and lands exactly where the hero is. No pop at the end.
@@ -1043,11 +1180,17 @@ export function ZoomProvider(props: ZoomProviderProps) {
       shadowOpacity: () => it.progress.get(),
       // Once it's following scrolled content, the copy is part of that content: hide
       // whatever has scrolled past the card's top or bottom edge, like the rest of it.
+      // Near its source, it also stays out from under a fixed or sticky header that covers the source.
       clip: () => {
-        if (it.flightScroll0 === null || it.flightScrollNow === it.flightScroll0 || !S.L) return null;
-        if (S.L.stream) return { top: zy.get(), bottom: zy.get() + zs.get() * S.L.H };
-        const top = zy.get() + zs.get() * (slot(it.j).y + it.cv.y.get());
-        return { top, bottom: top + zs.get() * it.cv.s.get() * S.L.cardH };
+        const cover = coverBand(it);
+        if (it.flightScroll0 === null || it.flightScrollNow === it.flightScroll0 || !S.L) return cover;
+        let band: { top: number; bottom: number };
+        if (S.L.stream) band = { top: zy.get(), bottom: zy.get() + zs.get() * S.L.H };
+        else {
+          const top = zy.get() + zs.get() * (slot(it.j).y + it.cv.y.get());
+          band = { top, bottom: top + zs.get() * it.cv.s.get() * S.L.cardH };
+        }
+        return cover ? { top: Math.max(band.top, cover.top), bottom: Math.min(band.bottom, cover.bottom) } : band;
       },
     });
     it.flight = flight;
@@ -1071,6 +1214,7 @@ export function ZoomProvider(props: ZoomProviderProps) {
     liveFlights.current?.remove(it.id, flight);
     // The card is whole again.
     it.clipOn = false;
+    it.clipInset = null;
     const card = cardEls.current.get(it.id);
     if (card) card.style.clipPath = "";
     updateProgress(it);
@@ -1128,10 +1272,17 @@ export function ZoomProvider(props: ZoomProviderProps) {
       Math.max(0, ch - b - (ch - hs.y - hs.h) * e),
       Math.max(0, l - hs.x * e),
     ];
+    // Kept out from under a header covering the source, like the flying image.
+    const cover = coverBand(it);
+    if (cover) {
+      inset[0] = Math.max(inset[0], (cover.top - Y) / k);
+      inset[2] = Math.max(inset[2], (Y + k * ch - cover.bottom) / k);
+    }
+    it.clipInset = e >= 0.999 && !cover ? null : inset;
     const cr = it.cardRadius ?? [0, 0, 0, 0];
     const radii = w.r.map((v, i) => (v / k) * (1 - e) + cr[i] * e);
     card.style.clipPath =
-      e >= 0.999 ? "" : `inset(${inset.map((v) => `${v}px`).join(" ")} round ${radii.map((v) => `${v}px`).join(" ")})`;
+      !it.clipInset ? "" : `inset(${inset.map((v) => `${v}px`).join(" ")} round ${radii.map((v) => `${v}px`).join(" ")})`;
   };
 
   /** closeButtonTiming "flight" (the default): a still copy of the close button above the flying image, fading with it. */
@@ -1143,7 +1294,7 @@ export function ZoomProvider(props: ZoomProviderProps) {
     const br = btn.getBoundingClientRect();
     const cr = card.getBoundingClientRect();
     const k = cr.width / card.offsetWidth || 1;
-    return { el: btn, x: (br.left - cr.left) / k, y: (br.top - cr.top) / k };
+    return { el: btn, x: (br.left - cr.left) / k, y: (br.top - cr.top) / k, w: btn.offsetWidth, h: btn.offsetHeight };
   };
   const dropCloseCopy = () => {
     closeCopy.current?.remove();
@@ -1179,6 +1330,18 @@ export function ZoomProvider(props: ZoomProviderProps) {
     const Y = zy.get() + zs.get() * (P.y + it.cv.y.get());
     el.style.transform = `translate(${X + k * off.x}px, ${Y + k * off.y}px) scale(${k})`;
     el.style.opacity = String(clamp(progressOf(it), 0, 1));
+    // Only the part inside the card's current clip shows: early on, the card is cropped to the
+    // flying image and the button's place can lie outside it (it floated beside the card).
+    const ins = it.clipInset;
+    const cut = ins
+      ? [
+          Math.max(0, ins[0] - off.y),
+          Math.max(0, off.x + off.w - (S.L.cardW - ins[1])),
+          Math.max(0, off.y + off.h - (S.L.cardH - ins[2])),
+          Math.max(0, ins[3] - off.x),
+        ]
+      : null;
+    el.style.clipPath = cut && cut.some((v) => v > 0) ? `inset(${cut.map((v) => `${v}px`).join(" ")})` : "";
   };
 
   // One loop per frame while any card flies, in Motion's render step (after the values update).
@@ -1205,13 +1368,6 @@ export function ZoomProvider(props: ZoomProviderProps) {
   const restingDim = () => {
     const d = dismiss();
     return S.dimMax * (1 - clamp((1 - zs.get()) / d.maxShrink, 0, 1) * d.dimFade);
-  };
-  /** How far the active card is between its source (0) and fully open (1). */
-  const activeProgress = () => {
-    const it = items.current.get(S.ids[S.index]);
-    if (!it) return 1;
-    if (!Number.isFinite(it.sLand)) return clamp(it.cv.o.get(), 0, 1);
-    return clamp((it.cv.s.get() - it.sLand) / (1 - it.sLand), 0, 1);
   };
   /** The visible card's progress, 0 on its source to 1 open (the fade, with reduced motion). */
   const visibleProgress = () => {
@@ -1271,7 +1427,7 @@ export function ZoomProvider(props: ZoomProviderProps) {
     } else if (S.mode === "cards") {
       // Continuous from wherever the dim was when this transition started,
       // heading to full dim when open and to none at the sources.
-      const p = activeProgress();
+      const p = visibleProgress();
       const { p0, d0 } = S.dimAnchor;
       const d =
         p >= p0 ? (p0 >= 0.999 ? S.dimMax : d0 + ((S.dimMax - d0) * (p - p0)) / (1 - p0)) : p0 <= 0.001 ? 0 : (d0 * p) / p0;
@@ -1309,11 +1465,53 @@ export function ZoomProvider(props: ZoomProviderProps) {
       .map((e) => e.id);
 
   const register = useCallback((entry: SourceEntry) => {
-    sources.current.set(entry.id, entry);
+    allSources.current.set(entry.id, [...(allSources.current.get(entry.id) ?? []), entry]);
+    if (!sources.current.get(entry.id)?.el.isConnected) sources.current.set(entry.id, entry);
     return () => {
-      if (sources.current.get(entry.id)?.el === entry.el) sources.current.delete(entry.id);
+      const rest = (allSources.current.get(entry.id) ?? []).filter((e) => e !== entry);
+      if (rest.length) allSources.current.set(entry.id, rest);
+      else allSources.current.delete(entry.id);
+      if (sources.current.get(entry.id) === entry) {
+        if (rest.length) sources.current.set(entry.id, rest[0]);
+        else sources.current.delete(entry.id);
+      }
     };
   }, []);
+
+  const onScreen = (el: HTMLElement) => {
+    const r = el.getBoundingClientRect();
+    return r.width >= 1 && r.bottom > 0 && r.right > 0 && r.top < window.innerHeight && r.left < window.innerWidth;
+  };
+  /**
+   * The same item can be on the page twice (a featured tile and again in a list). Open from the
+   * copy that was clicked or has focus; failing that, one that's on screen. Each id's choice is
+   * kept for the session, so the card also lands back on it.
+   */
+  const pickSources = (id: string) => {
+    const live = (i: string) => (allSources.current.get(i) ?? []).filter((e) => e.el.isConnected);
+    const list = live(id);
+    let entry = list[0] ?? sources.current.get(id);
+    if (list.length > 1) {
+      const hints = S.input === "pointer" ? [S.lastPointer, document.activeElement] : [document.activeElement, S.lastPointer];
+      const hit = hints
+        .filter((t): t is Element => t instanceof Element)
+        .map((t) => {
+          const trigger = t.closest("a, button, [tabindex]") ?? t;
+          return list.find((e) => e.el.contains(t) || trigger.contains(e.el));
+        })
+        .find(Boolean);
+      entry = hit ?? list.find((e) => onScreen(e.el)) ?? list[0];
+    }
+    if (!entry) return null;
+    sources.current.set(id, entry);
+    // Twice-shown neighbours in the same group: prefer a copy that's on screen.
+    allSources.current.forEach((_, other) => {
+      if (other === id) return;
+      const copies = live(other).filter((e) => e.group === entry!.group);
+      if (copies.length > 1) sources.current.set(other, copies.find((e) => onScreen(e.el)) ?? copies[0]);
+    });
+    return entry;
+  };
 
   /** With groupOpacity: the visible item's source hidden, the others dimmed (following followVisible). */
   const markGroup = (hideVisible: boolean) => {
@@ -1358,14 +1556,15 @@ export function ZoomProvider(props: ZoomProviderProps) {
     if (S.groupOpacity !== null) {
       markGroup(true);
       followVisible();
-    } else if (latest.current.hideGroupWhileOpen === false) {
+    } else {
+      // hideGroupWhileOpen={false}: only the visible item's own source is hidden.
       S.ids.forEach((id, j) => {
         const el = sources.current.get(id)?.el;
         if (!el) return;
         if (j === S.index) el.dataset.zoomHidden = "";
         else delete el.dataset.zoomHidden;
       });
-    } else setGroupHidden(true);
+    }
   };
   const setGroupHidden = (hidden: boolean) => {
     S.ids.forEach((id) => {
@@ -1428,21 +1627,27 @@ export function ZoomProvider(props: ZoomProviderProps) {
       return;
     }
     if (S.phase !== "idle" || !rootRef.current) return;
-    const entry = sources.current.get(id);
+    const entry = pickSources(id);
     if (!entry) return;
     const ids = latest.current.paging === false ? [id] : orderedIds(entry.group);
     S.ids = ids;
     S.index = ids.indexOf(id);
     S.L = computeLayout();
-    S.reduced = !!reduceRef.current;
+    // Opening from the page's own address on load is instant too (nothing to fly from yet).
+    S.reduced = !!reduceRef.current || S.deepLink;
     const d = latest.current.dim;
     S.dimMax = typeof d === "function" ? d() : d ?? 0.35;
-    S.groupOpacity = latest.current.groupOpacity ?? null;
+    // The rest of the group fades out as the card opens (and back as it closes) rather than
+    // blinking out at the tap. hideGroupWhileOpen={false} keeps them; groupOpacity sets a level.
+    S.groupOpacity = latest.current.groupOpacity ?? (latest.current.hideGroupWhileOpen === false ? null : 0);
     S.flyVisible = latest.current.flyHome === "visible";
     S.pendingOpen = id;
     S.pointerOpened = S.input === "pointer";
     S.origin = entry.el;
+    S.opener = document.activeElement;
     S.mode = "zoom";
+    if (!S.reduced) measureBands(ids);
+    S.ready = new Set(ids.filter((_, j) => Math.abs(j - S.index) <= 1));
     setPhase("opening");
     ids.forEach((i, j) => resetItem(getItem(i, j)));
     track.jump(trackAt(S.index)); // so the freshly mounted track renders in place
@@ -1450,7 +1655,12 @@ export function ZoomProvider(props: ZoomProviderProps) {
     setLayout(S.L);
     setIndexState(S.index);
     setSession({ ids, key: ++S.sessionKey });
-    pushEntry(id);
+    if (S.deepLink) {
+      // The page's own address is this item's: no entry to add, but leaving takes the #id off.
+      S.deepLink = false;
+      S.deepLinked = true;
+      S.deepLinkOpening = true;
+    } else pushEntry(id);
   }, []);
 
   // First open from idle: runs after the cards mount but before they paint.
@@ -1500,7 +1710,7 @@ export function ZoomProvider(props: ZoomProviderProps) {
     // Measure at full size first, before the zoom is applied (and before any writes).
     const card = cardEls.current.get(id)!;
     const heroEl = heroFor(id);
-    const pre = heroEl ? prepareFlight(id, heroEl) : null;
+    const pre = heroEl ? prepareFlight(id, heroEl, S.origin) : null;
     // A hero with no size yet (an image still downloading, its space not reserved) can't
     // fly; the card zooms on its own and the image appears in it when it arrives.
     const hero = pre && canFly(pre.metrics) ? heroEl : null;
@@ -1524,10 +1734,13 @@ export function ZoomProvider(props: ZoomProviderProps) {
     zoomer.style.transform = `translateX(${z.x}px) translateY(${z.y}px) scale(${z.s})`;
     zoomer.style.opacity = "0";
     dimRef.current!.style.opacity = "0";
-    // Every item that has a card in the pager is hidden on the page while it's up,
-    // so nothing shows twice in the gaps between cards (unless hideGroupWhileOpen is off).
+    // The clicked source is hidden (its flying picture covers it); the rest of the group fades out
+    // as the card opens, so nothing shows twice in the gaps between cards (unless
+    // hideGroupWhileOpen is off).
     hideForOpen();
     root.dataset.open = "";
+    // Focus moves into the card at once (the opener is made inert, which would leave it on nothing).
+    focusCard(id);
 
     const anims = [
       springTo(zx, 0, T.open, { speed: sp }),
@@ -1605,6 +1818,11 @@ export function ZoomProvider(props: ZoomProviderProps) {
 
   const openDone = () => {
     S.mode = "zoom";
+    if (S.deepLinkOpening) {
+      // The card opened instantly from the address; from here on, motion follows the device setting.
+      S.deepLinkOpening = false;
+      S.reduced = !!reduceRef.current;
+    }
     // The window changed size during the transition (resizes are ignored mid-flight): fit the cards to it now.
     const root = rootRef.current;
     if (S.L && root && (root.clientWidth !== S.L.W || root.clientHeight !== S.L.H)) {
@@ -1621,8 +1839,32 @@ export function ZoomProvider(props: ZoomProviderProps) {
     gesturesRef.current?.refresh();
     prefreezeStaticHeroes();
     updateDerived();
+    // Unless focus is already in the card (the visitor tabbed into it while it opened).
     const card = cardEls.current.get(S.ids[S.index]);
-    card?.querySelector<HTMLElement>("[data-zoom-close]")?.focus({ preventScroll: true });
+    if (!card?.contains(document.activeElement)) focusCard(S.ids[S.index]);
+    fillCards();
+  };
+
+  /** After landing: render the group's remaining cards a few at a time while idle, nearest first. */
+  const fillCards = () => {
+    const key = S.sessionKey;
+    const idle = (cb: () => void) => {
+      const ric = (window as any).requestIdleCallback as ((cb: () => void, o?: { timeout: number }) => number) | undefined;
+      if (ric) ric(cb, { timeout: 500 });
+      else setTimeout(cb, 50);
+    };
+    const step = () => {
+      if (key !== S.sessionKey || S.phase !== "open") return;
+      const missing = S.ids
+        .map((id, j) => ({ id, d: Math.abs(j - S.index) }))
+        .filter((x) => !S.ready.has(x.id))
+        .sort((a, b) => a.d - b.d);
+      if (!missing.length) return;
+      missing.slice(0, 3).forEach((x) => S.ready.add(x.id));
+      setReadyTick((n) => n + 1);
+      if (missing.length > 3) idle(step);
+    };
+    idle(step);
   };
 
   /* -------------------------------------------------------------- paging */
@@ -1632,6 +1874,7 @@ export function ZoomProvider(props: ZoomProviderProps) {
     S.refocus = !quiet && !!rootRef.current?.contains(document.activeElement);
     const previous = S.index;
     S.index = i;
+    S.ids.forEach((id, j) => Math.abs(j - i) <= 1 && S.ready.add(id));
     if (previous !== i && (S.phase === "open" || S.phase === "opening")) {
       recordPage(S.ids[i], quiet);
       const prevId = S.ids[previous];
@@ -1653,7 +1896,7 @@ export function ZoomProvider(props: ZoomProviderProps) {
     gesturesRef.current?.refresh();
     if (!S.refocus || S.phase !== "open") return;
     S.refocus = false;
-    cardEls.current.get(S.ids[index])?.querySelector<HTMLElement>("[data-zoom-close]")?.focus({ preventScroll: true });
+    focusCard(S.ids[index]);
   }, [index]);
 
   // Also while opening: the cards and the flying hero slide over without restarting.
@@ -1737,6 +1980,7 @@ export function ZoomProvider(props: ZoomProviderProps) {
 
     // Read everything up front, then write. Interleaving reads with writes made the
     // browser recompute layout once per card at the moment of release.
+    if (target === "sources") measureBands(S.ids); // what covers each source now (a header)
     const rootBox = rootRef.current!.getBoundingClientRect();
     const measured = new Map(
       S.ids.map((id) => {
@@ -1747,8 +1991,13 @@ export function ZoomProvider(props: ZoomProviderProps) {
         const flies = !!metrics && canFly(metrics);
         const offset = heroOffset(id);
         const heroRect = hero ? rel(hero.getBoundingClientRect(), rootBox) : null;
-        // null when the source is gone or hidden: the card then fades instead of flying.
-        const dest = sourceBox(src?.el, rootBox);
+        // null when the source is gone or hidden: the card then fades instead of flying. So does a
+        // card (other than the visible one) whose source is off screen: its flight would go where
+        // nobody sees it, and in a big group those flights made the start of closing stall.
+        const box = sourceBox(src?.el, rootBox);
+        const seen =
+          !!box && (id === S.ids[index] || (box.x + box.w > 0 && box.y + box.h > 0 && box.x < rootBox.width && box.y < rootBox.height));
+        const dest = seen ? box : null;
         // The hero's corners as they look right now (the card may be shrunk by a drag).
         const own = flies && offset ? heroCorners(id, offset, metrics!.radius) : null;
         return [
@@ -1760,7 +2009,7 @@ export function ZoomProvider(props: ZoomProviderProps) {
             openCorners: own,
             dest,
             // Only cards without a flight in the air will need a new one.
-            pre: flies && !it.flight ? prepareFlight(id, hero!) : null,
+            pre: flies && dest && !it.flight ? prepareFlight(id, hero!, src?.el) : null,
             metrics: flies ? metrics : null,
           },
         ];
@@ -1807,8 +2056,14 @@ export function ZoomProvider(props: ZoomProviderProps) {
         ]);
       }
 
-      if (!dest || !src) {
-        // Nothing to return to: just fade (and settle back in place if reopening).
+      if (!dest || !src || !cardEls.current.has(id)) {
+        // Nothing to return to (or a card not rendered yet): just fade (and settle back in place if reopening).
+        if (it.flight) {
+          // It was flying to a source that has since gone or scrolled away: it fades where it is.
+          endFlight(it);
+          if (hero) hero.style.visibility = "";
+          if (src) delete src.el.dataset.zoomHidden;
+        }
         const anims = [springTo(cv.o, target === "sources" ? 0 : 1, T.fade, { restDelta: REST.opacity, speed: sp })];
         if (target === "open") {
           anims.push(
@@ -1877,7 +2132,7 @@ export function ZoomProvider(props: ZoomProviderProps) {
           );
         } else {
           const from = wasLanded ? dest : m.heroRect!;
-          startFlight(it, hero, from, heroTarget, m.pre ?? prepareFlight(id, hero), target === "open" ? trackAt(index) : null);
+          startFlight(it, hero, from, heroTarget, m.pre ?? prepareFlight(id, hero, src?.el), target === "open" ? trackAt(index) : null);
           aimClip(it, target === "open", off);
           // The hero was moving with its card: its centre's speed follows from the card's.
           const f = it.flight!;
@@ -1907,7 +2162,7 @@ export function ZoomProvider(props: ZoomProviderProps) {
     });
 
     // Dim continues from its current value, driven by the active card.
-    S.dimAnchor = { p0: activeProgress(), d0: dimOpacity.get() };
+    S.dimAnchor = { p0: visibleProgress(), d0: dimOpacity.get() };
     S.offDim?.();
     S.offDim = getItem(S.ids[index], index).cv.s.on("change", updateDerived);
     updateDerived();
@@ -2036,6 +2291,7 @@ export function ZoomProvider(props: ZoomProviderProps) {
   };
 
   const closeDone = () => {
+    const refocus = mayMoveFocus();
     presence.current.forEach((mv) => mv.jump(1)); // before the group is unmarked below
     S.ids.forEach((id, j) => {
       const it = getItem(id, j);
@@ -2064,7 +2320,11 @@ export function ZoomProvider(props: ZoomProviderProps) {
     dimOpacity.jump(0);
     setSession(null);
     const focusable = focusTarget?.closest<HTMLElement>("button, a[href], [tabindex]") ?? focusTarget;
-    if (focusable) returnFocus(focusable, S.pointerOpened);
+    // Back to what opened the card, unless the visitor has already moved on (clicked into a
+    // field on the page while the card flew home).
+    if (focusable && refocus) returnFocus(focusable, S.pointerOpened);
+    S.opener = null;
+    S.bands.clear();
   };
 
   /**
@@ -2166,7 +2426,10 @@ export function ZoomProvider(props: ZoomProviderProps) {
     gesturesRef.current = gestures;
     window.addEventListener("keydown", onKey);
     // Which kind of input came last, so focus returns without a ring after a pointer open.
-    const onPointerInput = () => (S.input = "pointer");
+    const onPointerInput = (e: PointerEvent) => {
+      S.input = "pointer";
+      S.lastPointer = e.target;
+    };
     const onKeyInput = (e: KeyboardEvent) => {
       if (!["Shift", "Control", "Alt", "Meta"].includes(e.key)) S.input = "keyboard";
     };
@@ -2198,6 +2461,10 @@ export function ZoomProvider(props: ZoomProviderProps) {
       if (!historyOption()) return;
       if (S.ignorePops > 0) {
         S.ignorePops -= 1;
+        if (S.ignorePops === 0 && S.stripAfterPop) {
+          S.stripAfterPop = false;
+          stripHash();
+        }
         if (S.ignorePops === 0 && S.pendingPush) {
           const id = S.pendingPush;
           S.pendingPush = null;
@@ -2266,18 +2533,23 @@ export function ZoomProvider(props: ZoomProviderProps) {
       setBackgroundInert(false);
       unlockScroll();
       S.phase = "idle";
+      // Focus was in the overlay, which is gone: give it back to what opened the card.
+      const back = S.origin?.closest<HTMLElement>("button, a[href], [tabindex]") ?? S.origin;
+      if (back?.isConnected && mayMoveFocus()) back.focus({ preventScroll: true });
     },
     [],
   );
 
-  // Plain-HTML sources (e.g. static Astro markup).
+  // Plain-HTML sources (e.g. static Astro markup), including ones added to the page later
+  // ("load more", a client-side page swap): the page is watched and rescanned when it changes.
   useEffect(() => {
     const scan = latest.current.scan;
     if (!scan || !host) return;
     const selector = scan === true ? "[data-zoom-source]" : scan;
-    const cleanups = [...document.querySelectorAll<HTMLElement>(selector)].map((el) => {
+    const found = new Map<HTMLElement, () => void>();
+    const attach = (el: HTMLElement) => {
       const id = el.dataset.zoomSource;
-      if (!id) return () => {};
+      if (!id) return;
       const unregister = register({ id, group: el.dataset.zoomGroup ?? "default", el });
       const trigger = el.closest<HTMLElement>("a, button") ?? el;
       const onClick = (e: MouseEvent) => {
@@ -2287,12 +2559,58 @@ export function ZoomProvider(props: ZoomProviderProps) {
         open(id);
       };
       trigger.addEventListener("click", onClick);
-      return () => {
+      found.set(el, () => {
         unregister();
         trigger.removeEventListener("click", onClick);
-      };
+      });
+    };
+    const rescan = () => {
+      found.forEach((off, el) => {
+        if (el.isConnected) return;
+        off();
+        found.delete(el);
+      });
+      document.querySelectorAll<HTMLElement>(selector).forEach((el) => found.has(el) || attach(el));
+    };
+    rescan();
+    let raf = 0;
+    const mo = new MutationObserver((records) => {
+      // Only rescan for elements added or removed on the page (not in the overlay, which changes
+      // all through a transition), at most once per frame.
+      const root = rootRef.current;
+      if (raf || !records.some((r) => (r.addedNodes.length || r.removedNodes.length) && !root?.contains(r.target))) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        rescan();
+      });
     });
-    return () => cleanups.forEach((c) => c());
+    mo.observe(document.body, { childList: true, subtree: true });
+    return () => {
+      mo.disconnect();
+      cancelAnimationFrame(raf);
+      found.forEach((off) => off());
+    };
+  }, [host]);
+
+  // A page loaded at an item's #id address (a shared link, a reload) opens that item's card at
+  // once. Only for the default #id addresses: those live on this page. With your own url
+  // ("/work/slug"), each address is a page of its own and should show the item there.
+  useEffect(() => {
+    const h = latest.current.history;
+    if (!host || !h || h.url) return;
+    const raf = requestAnimationFrame(() => {
+      let id = "";
+      try {
+        id = decodeURIComponent(location.hash.slice(1));
+      } catch {
+        return;
+      }
+      if (!id || S.phase !== "idle" || !sources.current.has(id)) return;
+      S.deepLink = true;
+      open(id);
+      S.deepLink = false;
+    });
+    return () => cancelAnimationFrame(raf);
   }, [host]);
 
   const api = useMemo(() => ({ open, close: () => close(), register, isOpen: !!session }), [open, close, register, session]);
@@ -2354,7 +2672,9 @@ export function ZoomProvider(props: ZoomProviderProps) {
                     : { x: track }
               }
             >
-              {session.ids.map((id, j) => (
+              {session.ids.map((id, j) =>
+                // In a pager, a card is only rendered once it's needed (see S.ready).
+                !(layout.stream || S.ready.has(id) || Math.abs(j - index) <= 1) ? null : (
                 <ZoomCard
                   key={id}
                   id={id}
@@ -2372,7 +2692,8 @@ export function ZoomProvider(props: ZoomProviderProps) {
                   makeContext={cardContext}
                   setCardEl={setCardEl}
                 />
-              ))}
+                ),
+              )}
             </motion.div>
           )}
         </motion.div>
@@ -2388,7 +2709,9 @@ export function ZoomProvider(props: ZoomProviderProps) {
               <ZoomHeroContext.Provider
                 value={{ progress: getItem(id, j).progress, focus: getItem(id, j).focus, phase: phaseMV, inFlight: true, item: getItem(id, j).api }}
               >
-                <LiveMount onMount={flight.dropSnapshot}>{heroContent.current.get(id)?.children}</LiveMount>
+                <DestinationBoundary>
+                  <LiveMount onMount={flight.dropSnapshot}>{heroContent.current.get(id)?.children}</LiveMount>
+                </DestinationBoundary>
               </ZoomHeroContext.Provider>
             </ZoomCardContext.Provider>,
             liveHost,
